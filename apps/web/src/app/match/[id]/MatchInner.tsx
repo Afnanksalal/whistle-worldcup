@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import type {
   Fixture,
@@ -18,6 +19,7 @@ import { useRuntime } from "../../../lib/runtime";
 import { PredictionChart } from "../../../components/PredictionChart";
 import { MatchStatsPanel } from "../../../components/MatchStatsPanel";
 import { InsightsPanel } from "../../../components/InsightsPanel";
+import { TeamCrest } from "../../../components/TeamCrest";
 
 type Detail = {
   fixture: Fixture;
@@ -30,12 +32,18 @@ type Detail = {
 };
 
 const OUTCOME_LABELS: Record<string, string> = {
-  home: "Home",
+  home: "Home win",
   draw: "Draw",
-  away: "Away",
+  away: "Away win",
   over: "Over",
   under: "Under",
 };
+
+function outcomeName(outcome: string, fixture: Fixture) {
+  if (outcome === "home") return fixture.home.name;
+  if (outcome === "away") return fixture.away.name;
+  return OUTCOME_LABELS[outcome] || outcome;
+}
 
 export default function MatchPageInner() {
   const params = useParams();
@@ -49,72 +57,80 @@ export default function MatchPageInner() {
   const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
   const [selectedOutcome, setSelectedOutcome] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
+  const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async () => {
     try {
-      const q = squadId ? `?squadId=${encodeURIComponent(squadId)}` : "";
-      const d = await api<Detail>(`/fixtures/${id}${q}`);
-      setData(d);
-      setSelectedMarket((prev) => prev || d.markets[0]?.id || null);
+      const query = squadId ? `?squadId=${encodeURIComponent(squadId)}` : "";
+      const detail = await api<Detail>(`/fixtures/${id}${query}`);
+      setData(detail);
+      setSelectedMarket((current) =>
+        current && detail.markets.some((market) => market.id === current)
+          ? current
+          : detail.markets[0]?.id || null
+      );
       setError(null);
-    } catch (e) {
-      setError(String(e));
+    } catch {
+      setError("This match is not available from the current tournament feed.");
     }
-  };
+  }, [id, squadId]);
 
   useEffect(() => {
     void load();
-    const t = setInterval(() => void load(), 4000);
-    return () => clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, squadId]);
+    const poll = setInterval(() => void load(), data?.fixture.status === "live" ? 4_000 : 12_000);
+    return () => clearInterval(poll);
+  }, [data?.fixture.status, load]);
 
   const market = useMemo(
-    () => data?.markets.find((m) => m.id === selectedMarket) || data?.markets[0],
+    () => data?.markets.find((item) => item.id === selectedMarket) || data?.markets[0],
     [data, selectedMarket]
   );
-
-  const implied = market ? impliedShares(market.outcomes) : {};
+  const shares = market ? impliedShares(market.outcomes) : {};
+  const history = market ? data?.priceHistory?.[market.id] || [] : [];
 
   const chartLabels = useMemo(() => {
     if (!data || !market) return {};
-    const labels: Record<string, string> = {};
-    for (const k of Object.keys(market.outcomes)) {
-      labels[k] =
-        k === "home"
-          ? data.fixture.home.name
-          : k === "away"
-            ? data.fixture.away.name
-            : OUTCOME_LABELS[k] || k;
-    }
-    return labels;
+    return Object.fromEntries(
+      Object.keys(market.outcomes).map((key) => [key, outcomeName(key, data.fixture)])
+    );
   }, [data, market]);
 
-  const history = market ? data?.priceHistory?.[market.id] || [] : [];
+  const quote = useMemo(() => {
+    if (!market || !selectedOutcome || !Number.isFinite(amount) || amount <= 0) return null;
+    const currentOutcome = market.outcomes[selectedOutcome] || 0;
+    const nextTotal = market.totalPool + amount;
+    const nextOutcome = currentOutcome + amount;
+    const estimatedPayout = nextOutcome > 0 ? (amount / nextOutcome) * nextTotal : 0;
+    return {
+      nextShare: nextTotal > 0 ? nextOutcome / nextTotal : 0,
+      estimatedPayout,
+      estimatedProfit: estimatedPayout - amount,
+      currentOutcome,
+    };
+  }, [amount, market, selectedOutcome]);
 
   const stake = async () => {
-    if (!market || !selectedOutcome || !owner) return;
+    if (!market || !selectedOutcome || !owner || !quote || amount <= 0) return;
     setBusy(true);
-    setMsg(null);
+    setNotice(null);
     try {
       const headers = await withWalletAuth();
       await api(`/markets/${market.id}/deposit`, {
         method: "POST",
         headers,
-        body: JSON.stringify({
-          outcome: selectedOutcome,
-          amount,
-          owner,
-        }),
+        body: JSON.stringify({ outcome: selectedOutcome, amount, owner }),
       });
-      setMsg(
-        `Locked ${amount} ${stakeLabel} on ${OUTCOME_LABELS[selectedOutcome] || selectedOutcome}`
-      );
+      setNotice({
+        tone: "success",
+        text: `${amount} ${stakeLabel} confirmed on ${outcomeName(selectedOutcome, data!.fixture)}.`,
+      });
       await load();
-    } catch (e) {
-      setMsg(String(e));
+    } catch (cause) {
+      setNotice({
+        tone: "error",
+        text: cause instanceof Error ? cause.message : "The prediction could not be confirmed.",
+      });
     } finally {
       setBusy(false);
     }
@@ -122,9 +138,11 @@ export default function MatchPageInner() {
 
   if (error) {
     return (
-      <main className="shell" style={{ padding: "2rem 0" }}>
-        <div className="panel" style={{ padding: "1.5rem", color: "var(--signal)" }}>
-          {error}
+      <main id="main-content" className="shell match-page match-page-state">
+        <div className="empty-state is-error" role="alert">
+          <strong>Match unavailable</strong>
+          <p>{error}</p>
+          <Link href="/" className="btn btn-primary">Back to matches</Link>
         </div>
       </main>
     );
@@ -132,222 +150,270 @@ export default function MatchPageInner() {
 
   if (!data) {
     return (
-      <main className="shell" style={{ padding: "3rem 0", color: "var(--mute)" }}>
-        Syncing market…
+      <main id="main-content" className="shell match-page match-page-state" aria-busy="true">
+        <div className="match-loading">
+          <span /><span /><span />
+          <p>Opening the match centre…</p>
+        </div>
       </main>
     );
   }
 
   const { fixture, live } = data;
-  const home = live?.homeScore ?? fixture.score?.home ?? 0;
-  const away = live?.awayScore ?? fixture.score?.away ?? 0;
+  const homeScore = live?.homeScore ?? fixture.score?.home;
+  const awayScore = live?.awayScore ?? fixture.score?.away;
+  const hasScore = homeScore !== undefined && awayScore !== undefined;
+  const canStake =
+    market?.status === "open" &&
+    fixture.status === "scheduled" &&
+    fixture.kickoffTs > Date.now();
 
   return (
-    <main className="shell" style={{ padding: "2rem 0 4rem" }}>
-      {squadId && (
-        <p className="mono" style={{ color: "var(--cyan)", fontSize: "0.75rem", marginBottom: "0.75rem" }}>
-          SQUAD MARKET
-        </p>
-      )}
+    <main id="main-content" className="shell match-page">
+      <div className="match-breadcrumbs">
+        <Link href="/">← All matches</Link>
+        {squadId && <span>Squad pool</span>}
+      </div>
 
-      <div className="rise panel" style={{ padding: "1.6rem 1.4rem", marginBottom: "1rem" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "0.5rem",
-            marginBottom: "1.1rem",
-            flexWrap: "wrap",
-          }}
-        >
-          {fixture.status === "live" && <span className="live-dot" />}
-          <span className="mono" style={{ color: "var(--cyan)", fontSize: "0.75rem", fontWeight: 600 }}>
-            {statusLabel(fixture.status)}
-            {live?.clock ? ` · ${live.clock}` : ""}
-          </span>
-          <span className="mono" style={{ color: "var(--mute)", fontSize: "0.72rem" }}>
-            {formatKickoff(fixture.kickoffTs)}
-          </span>
-          {fixture.competition && (
-            <span className="mono" style={{ color: "var(--mute)", fontSize: "0.72rem" }}>
-              · {fixture.competition}
-              {fixture.round ? ` · ${fixture.round}` : ""}
+      <section className="match-scorecard" aria-labelledby="match-title">
+        <div className="match-scorecard-top">
+          <div>
+            <span className={`status-badge${fixture.status === "live" ? " is-live" : fixture.status === "finished" ? " is-finished" : ""}`}>
+              {statusLabel(fixture.status)}{live?.clock ? ` · ${live.clock}` : ""}
             </span>
-          )}
-        </div>
-
-        <div className="score-board">
-          <div className="display" style={{ fontSize: "1.35rem", textAlign: "right" }}>
-            {fixture.home.name}
+            <span>{fixture.competition || "World Cup"}</span>
           </div>
-          <div className="score-num">
-            {home}
-            <span style={{ color: "var(--mute)", margin: "0 0.15rem" }}>:</span>
-            {away}
-          </div>
-          <div className="display" style={{ fontSize: "1.35rem" }}>
-            {fixture.away.name}
+          <div>
+            <time dateTime={new Date(fixture.kickoffTs).toISOString()}>{formatKickoff(fixture.kickoffTs)}</time>
+            {fixture.venue && <span>{fixture.venue}</span>}
           </div>
         </div>
-      </div>
 
-      <div style={{ marginBottom: "1rem" }}>
-        <PredictionChart history={history} labels={chartLabels} />
-      </div>
+        <h1 id="match-title" className="sr-only">{fixture.home.name} vs {fixture.away.name}</h1>
+        <div className="match-teams">
+          <div className="match-team match-team-home">
+            <TeamCrest team={fixture.home} variant="hero" />
+            <div>
+              <small>Home</small>
+              <strong>{fixture.home.name}</strong>
+            </div>
+          </div>
+          <div className={`match-score${hasScore ? " has-score" : ""}`}>
+            {hasScore ? (
+              <>{homeScore}<span>:</span>{awayScore}</>
+            ) : (
+              <><span>VS</span><small>{new Date(fixture.kickoffTs).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</small></>
+            )}
+          </div>
+          <div className="match-team match-team-away">
+            <TeamCrest team={fixture.away} variant="hero" />
+            <div>
+              <small>Away</small>
+              <strong>{fixture.away.name}</strong>
+            </div>
+          </div>
+        </div>
 
-      <div
-        style={{
-          display: "grid",
-          gap: "1rem",
-          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-          marginBottom: "1rem",
-        }}
-      >
-        <MatchStatsPanel
-          stats={data.stats || null}
-          homeName={fixture.home.shortName || fixture.home.name}
-          awayName={fixture.away.shortName || fixture.away.name}
-        />
-        <InsightsPanel insights={data.insights || []} />
-      </div>
+        <div className="match-ribbon match-ribbon-light" aria-label="Match timeline">
+          <span className={fixture.status === "scheduled" ? "active" : "passed"}>Kickoff</span>
+          <i />
+          <span className={fixture.status === "live" ? "active" : fixture.status === "finished" ? "passed" : ""}>Half-time</span>
+          <i />
+          <span className={fixture.status === "finished" ? "active" : ""}>Full-time</span>
+        </div>
+      </section>
 
-      <div
-        style={{
-          display: "grid",
-          gap: "1rem",
-          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-        }}
-      >
-        <div className="panel rise" style={{ padding: "1.25rem" }}>
-          <h2 className="display" style={{ fontSize: "1.15rem", marginTop: 0 }}>
-            Place order
-          </h2>
-          <div style={{ display: "flex", gap: "0.35rem", marginBottom: "1rem", flexWrap: "wrap" }}>
-            {data.markets.map((m) => (
-              <button
-                key={m.id}
-                className={market?.id === m.id ? "btn btn-primary" : "btn btn-ghost"}
-                style={{ padding: "0.4rem 0.8rem", fontSize: "0.8rem" }}
-                onClick={() => {
-                  setSelectedMarket(m.id);
-                  setSelectedOutcome(null);
-                }}
-              >
-                {m.marketType === "match_result" ? "1X2" : `O/U ${m.line}`}
-                {m.status !== "open" ? ` · ${m.status}` : ""}
-              </button>
-            ))}
+      <div className="match-layout">
+        <div className="match-analysis">
+          <PredictionChart history={history} labels={chartLabels} />
+
+          <div className="match-intelligence-grid">
+            <MatchStatsPanel
+              stats={data.stats || null}
+              homeName={fixture.home.shortName || fixture.home.name}
+              awayName={fixture.away.shortName || fixture.away.name}
+            />
+            <InsightsPanel insights={data.insights || []} />
           </div>
 
-          {market && (
+          <section className="reference-panel">
+            <div>
+              <p className="section-kicker">Market context</p>
+              <h2>Reference prices</h2>
+              <p>Independent reference quotes from the match feed, separate from the fan pool.</p>
+            </div>
+            {data.odds.length ? (
+              <div className="reference-quotes">
+                {data.odds.slice(0, 9).map((odds, index) => (
+                  <div key={`${odds.market}-${odds.selection}-${index}`}>
+                    <span>{odds.market} · {odds.selection}</span>
+                    <strong>{odds.price.toFixed(2)}</strong>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="reference-empty">
+                <strong>No reference price published</strong>
+                <span>The pool still works independently when the external quote is unavailable.</span>
+              </div>
+            )}
+          </section>
+        </div>
+
+        <aside className="bet-slip" aria-labelledby="bet-slip-title">
+          <div className="bet-slip-heading">
+            <div>
+              <p className="section-kicker">Your prediction</p>
+              <h2 id="bet-slip-title">Pick the outcome</h2>
+            </div>
+            <span>{stakeLabel === "units" ? "Play units" : stakeLabel}</span>
+          </div>
+
+          {data.markets.length > 0 ? (
             <>
-              <div style={{ display: "grid", gap: "0.45rem", marginBottom: "1rem" }}>
-                {Object.keys(market.outcomes).map((outcome) => {
-                  const share = implied[outcome] || 0;
-                  const active = selectedOutcome === outcome;
-                  return (
-                    <button
-                      key={outcome}
-                      className={`outcome-row${active ? " active" : ""}`}
-                      disabled={market.status !== "open"}
-                      onClick={() => setSelectedOutcome(outcome)}
-                    >
-                      <span>
-                        {outcome === "home"
-                          ? fixture.home.name
-                          : outcome === "away"
-                            ? fixture.away.name
-                            : OUTCOME_LABELS[outcome] || outcome}
-                      </span>
-                      <span className="mono" style={{ color: "var(--cyan-bright)", fontSize: "0.85rem" }}>
-                        {(share * 100).toFixed(0)}% · {market.outcomes[outcome].toFixed(0)}
-                      </span>
-                    </button>
-                  );
-                })}
+              <div className="market-tabs" aria-label="Choose a market">
+                {data.markets.map((item) => (
+                  <button
+                    type="button"
+                    key={item.id}
+                    className={market?.id === item.id ? "active" : ""}
+                    aria-pressed={market?.id === item.id}
+                    onClick={() => {
+                      setSelectedMarket(item.id);
+                      setSelectedOutcome(null);
+                      setNotice(null);
+                    }}
+                  >
+                    {item.marketType === "match_result" ? "Match result" : `Goals ${item.line}`}
+                  </button>
+                ))}
               </div>
 
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "0.85rem",
-                  color: "var(--mute)",
-                  fontSize: "0.85rem",
-                }}
-              >
-                Stake ({stakeLabel})
-                <input
-                  className="field mono"
-                  type="number"
-                  min={1}
-                  value={amount}
-                  onChange={(e) => setAmount(Number(e.target.value))}
-                />
-              </label>
+              {market && (
+                <>
+                  <div className="outcome-options">
+                    {Object.keys(market.outcomes).map((outcome) => {
+                      const active = selectedOutcome === outcome;
+                      const outcomePool = market.outcomes[outcome] || 0;
+                      const currentReturn = outcomePool > 0 ? market.totalPool / outcomePool : 0;
+                      return (
+                        <button
+                          type="button"
+                          key={outcome}
+                          className={active ? "active" : ""}
+                          aria-pressed={active}
+                          disabled={!canStake}
+                          onClick={() => {
+                            setSelectedOutcome(outcome);
+                            setNotice(null);
+                          }}
+                        >
+                          <span>
+                            <strong>{outcomeName(outcome, fixture)}</strong>
+                            <small>{outcomePool ? `${outcomePool.toLocaleString()} ${stakeLabel} backing` : "No picks yet"}</small>
+                          </span>
+                          <span>
+                            <strong>{market.totalPool > 0 ? `${Math.round((shares[outcome] || 0) * 100)}%` : "—"}</strong>
+                            <small>{currentReturn > 0 ? `${currentReturn.toFixed(2)}× now` : "opens evenly"}</small>
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
 
-              {!ready && (
-                <p style={{ color: "var(--signal)", fontSize: "0.88rem" }}>
-                  Connect a Solana wallet to stake.
-                </p>
-              )}
+                  <div className="stake-control">
+                    <label htmlFor="stake-amount">Stake amount</label>
+                    <div className="stake-input-wrap">
+                      <input
+                        id="stake-amount"
+                        type="number"
+                        inputMode="decimal"
+                        min={1}
+                        max={1_000_000}
+                        value={Number.isFinite(amount) ? amount : ""}
+                        onChange={(event) => setAmount(Number(event.target.value))}
+                      />
+                      <span>{stakeLabel}</span>
+                    </div>
+                    <div className="quick-stakes" aria-label="Quick stake amounts">
+                      {[10, 25, 50, 100].map((value) => (
+                        <button
+                          type="button"
+                          key={value}
+                          className={amount === value ? "active" : ""}
+                          onClick={() => setAmount(value)}
+                        >
+                          {value}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
 
-              <button
-                className="btn btn-primary"
-                style={{ width: "100%" }}
-                disabled={busy || !selectedOutcome || market.status !== "open" || !ready}
-                onClick={stake}
-              >
-                {market.status === "open" ? `Lock ${stakeLabel}` : `Market ${market.status}`}
-              </button>
+                  <div className={`payout-preview${quote ? " is-ready" : ""}`}>
+                    <div>
+                      <span>Estimated return</span>
+                      <strong>{quote ? `${quote.estimatedPayout.toFixed(2)} ${stakeLabel}` : "Choose an outcome"}</strong>
+                    </div>
+                    {quote && (
+                      <dl>
+                        <div>
+                          <dt>Your share after this pick</dt>
+                          <dd>{(quote.nextShare * 100).toFixed(1)}%</dd>
+                        </div>
+                        <div>
+                          <dt>Estimated profit</dt>
+                          <dd>{quote.estimatedProfit >= 0 ? "+" : ""}{quote.estimatedProfit.toFixed(2)} {stakeLabel}</dd>
+                        </div>
+                      </dl>
+                    )}
+                    <p>The estimate changes as more fans join the pool before kickoff.</p>
+                  </div>
 
-              {meta.settlementRail === "ledger" && (
-                <p style={{ marginTop: "0.75rem", color: "var(--mute)", fontSize: "0.8rem" }}>
-                  Settlement rail: ledger until on-chain program ID is set.
-                </p>
-              )}
-              {msg && (
-                <p style={{ marginTop: "0.75rem", color: "var(--mute)", fontSize: "0.88rem" }}>
-                  {msg}
-                </p>
+                  <div className="bet-rules">
+                    <span>Closes {formatKickoff(fixture.kickoffTs)}</span>
+                    <span>{meta.txlineConfigured ? "Result verified at full time" : "Unverified results refund"}</span>
+                  </div>
+
+                  {!ready && <p className="wallet-prompt">Connect a wallet to confirm your prediction.</p>}
+                  {!canStake && (
+                    <p className="wallet-prompt">
+                      {market.status === "settled"
+                        ? "This pool has settled."
+                        : market.status === "void"
+                          ? "This pool was refunded."
+                          : "Predictions are closed for this match."}
+                    </p>
+                  )}
+
+                  <button
+                    type="button"
+                    className="btn btn-primary bet-confirm"
+                    disabled={busy || !selectedOutcome || !quote || !ready || !canStake}
+                    onClick={stake}
+                  >
+                    {busy
+                      ? "Confirming…"
+                      : !selectedOutcome
+                        ? "Choose an outcome"
+                        : `Confirm ${amount || 0} ${stakeLabel}`}
+                  </button>
+
+                  {notice && (
+                    <div className={`bet-notice is-${notice.tone}`} role={notice.tone === "error" ? "alert" : "status"}>
+                      <p>{notice.text}</p>
+                      {notice.tone === "success" && <Link href="/positions">View my picks →</Link>}
+                    </div>
+                  )}
+                </>
               )}
             </>
-          )}
-        </div>
-
-        <div className="panel rise" style={{ padding: "1.25rem" }}>
-          <h2 className="display" style={{ fontSize: "1.15rem", marginTop: 0 }}>
-            Reference odds
-          </h2>
-          <p style={{ color: "var(--mute)", fontSize: "0.88rem", marginTop: 0 }}>
-            External consensus when TxLINE odds SSE is connected. Pool graph above is the tradable
-            price.
-          </p>
-          {data.odds.length === 0 ? (
-            <p style={{ color: "var(--mute)" }}>No external quotes on this fixture yet.</p>
           ) : (
-            <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.2rem" }}>
-              {data.odds.slice(0, 12).map((o, i) => (
-                <li
-                  key={`${o.market}-${o.selection}-${i}`}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    padding: "0.55rem 0",
-                    borderBottom: "1px solid var(--line)",
-                    fontSize: "0.88rem",
-                  }}
-                >
-                  <span style={{ color: "var(--mute)" }}>
-                    {o.market} · {o.selection}
-                  </span>
-                  <strong className="mono" style={{ color: "var(--cyan-bright)" }}>
-                    {o.price.toFixed(2)}
-                  </strong>
-                </li>
-              ))}
-            </ul>
+            <div className="bet-slip-empty">
+              <strong>No pool for this match</strong>
+              <p>The match feed has not opened a prediction pool yet.</p>
+            </div>
           )}
-        </div>
+        </aside>
       </div>
     </main>
   );

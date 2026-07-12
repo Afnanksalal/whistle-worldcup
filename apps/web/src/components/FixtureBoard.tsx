@@ -1,181 +1,448 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Fixture, MarketPool } from "@whistle/shared";
+import { impliedShares } from "@whistle/shared";
 import { api, formatKickoff, statusLabel, wsUrl } from "../lib/api";
+import { useRuntime, type AppMeta } from "../lib/runtime";
+import { TeamCrest, teamShortCode } from "./TeamCrest";
 
-type FixturesRes = { fixtures: Fixture[] };
+type FixturesRes = { fixtures: Fixture[]; meta?: AppMeta };
 type MarketsRes = { markets: MarketPool[] };
+type BoardFilter = "next" | "live" | "results";
+
+const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
+
+function countdown(ts: number, now: number) {
+  const diff = ts - now;
+  if (diff <= 0) return "Kickoff due";
+  const minutes = Math.floor(diff / 60_000);
+  const days = Math.floor(minutes / 1_440);
+  const hours = Math.floor((minutes % 1_440) / 60);
+  const mins = minutes % 60;
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${Math.max(1, mins)}m`;
+}
+
+function dayLabel(ts: number) {
+  const match = new Date(ts);
+  const today = new Date();
+  const tomorrow = new Date(today);
+  tomorrow.setDate(today.getDate() + 1);
+  const key = match.toDateString();
+  if (key === today.toDateString()) return "Today";
+  if (key === tomorrow.toDateString()) return "Tomorrow";
+  return match.toLocaleDateString(undefined, {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function matchStatusClass(status: Fixture["status"]) {
+  if (status === "live") return " is-live";
+  if (status === "finished") return " is-finished";
+  return "";
+}
 
 export function FixtureBoard() {
+  const { meta, stakeLabel } = useRuntime();
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
   const [markets, setMarkets] = useState<MarketPool[]>([]);
+  const [filter, setFilter] = useState<BoardFilter>("next");
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<"all" | "live" | "upcoming" | "finished">("all");
+  const [loading, setLoading] = useState(true);
+  const [now, setNow] = useState<number | null>(null);
+  const refreshQueued = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async (showLoader = false) => {
+    if (showLoader) setLoading(true);
     try {
-      const [f, m] = await Promise.all([
+      const [fixtureRes, marketRes] = await Promise.all([
         api<FixturesRes>("/fixtures"),
         api<MarketsRes>("/markets"),
       ]);
-      setFixtures(f.fixtures);
-      setMarkets(m.markets);
+      setFixtures(fixtureRes.fixtures);
+      setMarkets(marketRes.markets);
       setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
-  };
-
-  useEffect(() => {
-    load();
-    const t = setInterval(load, 8000);
-    let ws: WebSocket | null = null;
-    try {
-      ws = new WebSocket(wsUrl());
-      ws.onmessage = () => load();
     } catch {
-      // polling fallback
+      setError("The match feed is taking longer than expected. We’ll keep trying.");
+    } finally {
+      setLoading(false);
     }
-    return () => {
-      clearInterval(t);
-      ws?.close();
-    };
   }, []);
 
-  const poolByFixture = (id: string) =>
-    markets
-      .filter((m) => m.fixtureId === id && !m.squadId)
-      .reduce((a, m) => a + m.totalPool, 0);
+  useEffect(() => {
+    setNow(Date.now());
+    void load(true);
+    const poll = setInterval(() => void load(), 20_000);
+    const clock = setInterval(() => setNow(Date.now()), 30_000);
+    let socket: WebSocket | null = null;
 
-  const filtered = fixtures.filter((f) => {
-    if (filter === "all") return true;
-    if (filter === "live") return f.status === "live";
-    if (filter === "upcoming") return f.status === "scheduled";
-    return f.status === "finished";
-  });
+    try {
+      socket = new WebSocket(wsUrl());
+      socket.onmessage = () => {
+        if (refreshQueued.current) return;
+        refreshQueued.current = setTimeout(() => {
+          refreshQueued.current = null;
+          void load();
+        }, 700);
+      };
+    } catch {
+      // Polling remains active when WebSocket setup is unavailable.
+    }
 
-  const groups = Array.from(
-    new Set(filtered.map((f) => f.group || f.round || "Tournament").filter(Boolean))
+    return () => {
+      clearInterval(poll);
+      clearInterval(clock);
+      if (refreshQueued.current) clearTimeout(refreshQueued.current);
+      socket?.close();
+    };
+  }, [load]);
+
+  const ordered = useMemo(
+    () => [...fixtures].sort((a, b) => a.kickoffTs - b.kickoffTs),
+    [fixtures]
+  );
+  const live = ordered.filter((fixture) => fixture.status === "live");
+  const upcoming = ordered.filter(
+    (fixture) =>
+      fixture.status === "scheduled" && fixture.kickoffTs > (now || 0) - 15 * 60_000
+  );
+  const results = ordered
+    .filter((fixture) => fixture.status === "finished")
+    .sort((a, b) => b.kickoffTs - a.kickoffTs);
+  const featured = live[0] || upcoming[0] || results[0];
+
+  const marketsFor = useCallback(
+    (fixtureId: string) => markets.filter((market) => market.fixtureId === fixtureId && !market.squadId),
+    [markets]
   );
 
+  const shown = useMemo(() => {
+    if (filter === "live") return live;
+    if (filter === "results") return results.slice(0, 18);
+    return upcoming.slice(0, 18);
+  }, [filter, live, results, upcoming]);
+
+  const grouped = useMemo(() => {
+    const map = new Map<string, Fixture[]>();
+    for (const fixture of shown) {
+      const label = dayLabel(fixture.kickoffTs);
+      map.set(label, [...(map.get(label) || []), fixture]);
+    }
+    return [...map.entries()];
+  }, [shown]);
+
+  const featuredMarkets = featured ? marketsFor(featured.id) : [];
+  const featuredResult = featuredMarkets.find((market) => market.marketType === "match_result");
+  const featuredShares = featuredResult ? impliedShares(featuredResult.outcomes) : {};
+  const featuredPool = featuredResult?.totalPool || 0;
+  const hasFeaturedLiquidity = featuredPool > 0;
+  const sourceIsLive = meta.txlineConfigured;
+
   return (
-    <section className="shell rise" style={{ padding: "0 0 3.5rem" }}>
-      <div
-        style={{
-          display: "flex",
-          flexWrap: "wrap",
-          gap: "0.75rem",
-          marginBottom: "1.5rem",
-          alignItems: "end",
-          justifyContent: "space-between",
-        }}
-      >
-        <div>
-          <p className="eyebrow" style={{ marginBottom: "0.5rem" }}>
-            Order book
-          </p>
-          <h2 className="display" style={{ fontSize: "1.75rem", margin: 0 }}>
-            Active fixtures
-          </h2>
-        </div>
-        <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
-          {(["all", "live", "upcoming", "finished"] as const).map((f) => (
-            <button
-              key={f}
-              className={filter === f ? "btn btn-primary" : "btn btn-ghost"}
-              style={{ padding: "0.4rem 0.85rem", fontSize: "0.8rem" }}
-              onClick={() => setFilter(f)}
-            >
-              {f}
-            </button>
-          ))}
-        </div>
-      </div>
+    <>
+      <section className="home-hero" aria-labelledby="home-title">
+        <div className="shell home-hero-grid">
+          <div className="home-intro">
+            <div className="tournament-date">
+              <span>FIFA WORLD CUP 26</span>
+              <time dateTime={now ? new Date(now).toISOString() : undefined} suppressHydrationWarning>
+                {now
+                  ? new Date(now).toLocaleDateString(undefined, {
+                      month: "long",
+                      day: "numeric",
+                      year: "numeric",
+                    })
+                  : "Tournament live"}
+              </time>
+            </div>
+            <p className="section-kicker">Matchday pools</p>
+            <h1 id="home-title">Every match. One clear call.</h1>
+            <p className="home-lede">
+              Pick a side before kickoff. Your share of the winning pool is paid after the
+              final whistle—then the next match is ready.
+            </p>
+            <div className="hero-actions">
+              <a className="btn btn-primary" href="#matches">
+                See the matches
+              </a>
+              <Link className="text-link" href="/positions">
+                Track my picks <span aria-hidden>↗</span>
+              </Link>
+            </div>
+            <dl className="hero-facts">
+              <div>
+                <dt>Next kickoff</dt>
+                <dd>{upcoming[0] && now ? countdown(upcoming[0].kickoffTs, now) : live.length ? "Live now" : "TBC"}</dd>
+              </div>
+              <div>
+                <dt>Open matches</dt>
+                <dd>{upcoming.length + live.length}</dd>
+              </div>
+              <div>
+                <dt>Pool format</dt>
+                <dd>Parimutuel</dd>
+              </div>
+            </dl>
+          </div>
 
-      {error && (
-        <div className="panel" style={{ padding: "1rem", marginBottom: "1rem", color: "var(--signal)" }}>
-          Markets offline — start the API. ({error})
-        </div>
-      )}
-
-      {groups.map((g) => (
-        <div key={g} style={{ marginBottom: "1.75rem" }}>
-          <h3
-            className="mono"
-            style={{
-              color: "var(--mute)",
-              fontSize: "0.7rem",
-              letterSpacing: "0.14em",
-              textTransform: "uppercase",
-              marginBottom: "0.65rem",
-              fontWeight: 500,
-            }}
-          >
-            {g}
-          </h3>
-          <div style={{ display: "grid", gap: "0.55rem" }}>
-            {filtered
-              .filter((f) => (f.group || f.round || "Tournament") === g)
-              .map((f) => (
-                <Link key={f.id} href={`/match/${f.id}`} className="panel ticket">
+          <div className="featured-wrap">
+            {featured ? (
+              <article className="featured-match">
+                <div className="featured-topline">
                   <div>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.5rem",
-                        marginBottom: "0.4rem",
-                      }}
-                    >
-                      {f.status === "live" && <span className="live-dot" />}
-                      <span
-                        className="mono"
-                        style={{
-                          fontSize: "0.7rem",
-                          fontWeight: 600,
-                          letterSpacing: "0.06em",
-                          color:
-                            f.status === "live"
-                              ? "var(--signal)"
-                              : f.status === "finished"
-                                ? "var(--cyan)"
-                                : "var(--mute)",
-                        }}
-                      >
-                        {statusLabel(f.status)}
-                        {f.score ? `  ${f.score.home}-${f.score.away}` : ""}
-                      </span>
-                      <span className="mono" style={{ color: "var(--mute)", fontSize: "0.7rem" }}>
-                        {formatKickoff(f.kickoffTs)}
-                      </span>
-                    </div>
-                    <div className="display" style={{ fontSize: "1.2rem", fontWeight: 700 }}>
-                      {f.home.name}{" "}
-                      <span style={{ color: "var(--mute)", fontWeight: 500 }}>vs</span>{" "}
-                      {f.away.name}
-                    </div>
+                    <span className={`status-badge${matchStatusClass(featured.status)}`}>
+                      {statusLabel(featured.status)}
+                    </span>
+                    <span>{featured.competition || "World Cup"}</span>
                   </div>
-                  <div className="pool-chip">
-                    ${poolByFixture(f.id).toFixed(0)}
-                    <div style={{ color: "var(--mute)", fontSize: "0.65rem", fontWeight: 500 }}>
-                      pool
-                    </div>
+                  <span>{featured.venue || featured.round || "Match centre"}</span>
+                </div>
+
+                <div className="featured-kickoff">
+                  {featured.status === "scheduled" ? (
+                    <>
+                      <strong>Next kickoff</strong>
+                      <time dateTime={new Date(featured.kickoffTs).toISOString()}>
+                        {formatKickoff(featured.kickoffTs)}
+                      </time>
+                    </>
+                  ) : (
+                    <strong>{statusLabel(featured.status)}</strong>
+                  )}
+                </div>
+
+                <div className="featured-teams">
+                  <div className="featured-team featured-team-home">
+                    <TeamCrest team={featured.home} variant="featured" />
+                    <span>{featured.home.name}</span>
                   </div>
+                  <div className="featured-score" aria-label="score">
+                    {featured.score ? (
+                      <>
+                        {featured.score.home}<span>:</span>{featured.score.away}
+                      </>
+                    ) : (
+                      <span>vs</span>
+                    )}
+                  </div>
+                  <div className="featured-team featured-team-away">
+                    <TeamCrest team={featured.away} variant="featured" />
+                    <span>{featured.away.name}</span>
+                  </div>
+                </div>
+
+                <div className="match-ribbon" aria-label="Match timeline from kickoff to full time">
+                  <span className={featured.status === "scheduled" ? "active" : "passed"}>0′</span>
+                  <i />
+                  <span className={featured.status === "live" ? "active" : featured.status === "finished" ? "passed" : ""}>HT</span>
+                  <i />
+                  <span className={featured.status === "finished" ? "active" : ""}>90′</span>
+                </div>
+
+                <div className="featured-market">
+                  <div className="featured-market-heading">
+                    <div>
+                      <span>Match winner pool</span>
+                      <strong>
+                        {hasFeaturedLiquidity
+                          ? `${number.format(featuredPool)} ${stakeLabel}`
+                          : "Ready for the first pick"}
+                      </strong>
+                    </div>
+                    <span>{featuredResult?.status === "open" ? "Open" : featuredResult?.status || "View"}</span>
+                  </div>
+                  <div className="featured-outcomes">
+                    {(["home", "draw", "away"] as const).map((outcome) => (
+                      <div key={outcome}>
+                        <span>
+                          {outcome === "home"
+                            ? teamShortCode(featured.home.name, featured.home.shortName)
+                            : outcome === "away"
+                              ? teamShortCode(featured.away.name, featured.away.shortName)
+                              : "DRAW"}
+                        </span>
+                        <strong>
+                          {hasFeaturedLiquidity && featuredResult
+                            ? `${Math.round((featuredShares[outcome] || 0) * 100)}%`
+                            : "—"}
+                        </strong>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <Link className="featured-cta" href={`/match/${featured.id}`}>
+                  Open match pool <span aria-hidden>→</span>
                 </Link>
-              ))}
+              </article>
+            ) : (
+              <div className="featured-match featured-empty">
+                <p className="section-kicker">Match feed</p>
+                <h2>{loading ? "Loading the tournament…" : "The next kickoff is being confirmed."}</h2>
+              </div>
+            )}
           </div>
         </div>
-      ))}
+      </section>
 
-      {!filtered.length && !error && (
-        <div className="panel" style={{ padding: "1.5rem", color: "var(--mute)" }}>
-          {fixtures.length === 0
-            ? "No fixtures from the data feed yet — check API health / TxLINE credentials."
-            : "No fixtures in this filter."}
+      <section id="matches" className="match-board shell" aria-labelledby="matches-title">
+        <div className="section-heading-row">
+          <div>
+            <p className="section-kicker">Tournament schedule</p>
+            <h2 id="matches-title">Match centre</h2>
+          </div>
+          <div className="board-summary" aria-label="Tournament status">
+            <span className={live.length ? "is-live" : ""}>
+              {live.length ? `${live.length} live` : "No match live"}
+            </span>
+            <span>{results.length} results</span>
+          </div>
         </div>
-      )}
-    </section>
+
+        {!sourceIsLive && (
+          <div className="source-notice" role="status">
+            <span aria-hidden>i</span>
+            <p>
+              <strong>Schedule preview.</strong> Live match verification is not connected, so
+              pools use play units and unverified results refund automatically.
+            </p>
+          </div>
+        )}
+
+        <div className="board-toolbar">
+          <div className="segmented-control" aria-label="Filter matches">
+            {(
+              [
+                ["next", "Next", upcoming.length],
+                ["live", "Live", live.length],
+                ["results", "Results", results.length],
+              ] as const
+            ).map(([value, label, count]) => (
+              <button
+                key={value}
+                type="button"
+                className={filter === value ? "active" : ""}
+                aria-pressed={filter === value}
+                onClick={() => setFilter(value)}
+              >
+                {label} <span>{count}</span>
+              </button>
+            ))}
+          </div>
+          <span className="timezone-note">
+            Times shown in {now
+              ? Intl.DateTimeFormat().resolvedOptions().timeZone.replace(/_/g, " ")
+              : "your local time"}
+          </span>
+        </div>
+
+        {error && (
+          <div className="empty-state is-error" role="alert">
+            <strong>Match centre unavailable</strong>
+            <p>{error}</p>
+            <button type="button" className="btn btn-secondary" onClick={() => void load(true)}>
+              Try again
+            </button>
+          </div>
+        )}
+
+        {loading && !fixtures.length && (
+          <div className="fixture-skeletons" aria-label="Loading matches">
+            {[0, 1, 2].map((item) => <span key={item} />)}
+          </div>
+        )}
+
+        {!loading && !error && grouped.map(([day, dayFixtures]) => (
+          <div className="fixture-day" key={day}>
+            <div className="fixture-day-label">
+              <span>{day}</span>
+              <i />
+            </div>
+            <div className="fixture-list">
+              {dayFixtures.map((fixture) => {
+                const fixtureMarkets = marketsFor(fixture.id);
+                const resultMarket = fixtureMarkets.find((market) => market.marketType === "match_result");
+                const pool = fixtureMarkets.reduce((sum, market) => sum + market.totalPool, 0);
+                const shares = resultMarket ? impliedShares(resultMarket.outcomes) : {};
+                const hasLiquidity = pool > 0;
+                const hasResultLiquidity = (resultMarket?.totalPool || 0) > 0;
+                return (
+                  <Link className="fixture-card" href={`/match/${fixture.id}`} key={fixture.id}>
+                    <div className="fixture-time">
+                      <span className={`status-badge${matchStatusClass(fixture.status)}`}>
+                        {statusLabel(fixture.status)}
+                      </span>
+                      <time dateTime={new Date(fixture.kickoffTs).toISOString()}>
+                        {new Date(fixture.kickoffTs).toLocaleTimeString(undefined, {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}
+                      </time>
+                      <small>{fixture.round || fixture.group || "World Cup"}</small>
+                    </div>
+
+                    <div className="fixture-teams">
+                      <div>
+                        <TeamCrest team={fixture.home} />
+                        <strong>{fixture.home.name}</strong>
+                        {fixture.score && <b>{fixture.score.home}</b>}
+                      </div>
+                      <div>
+                        <TeamCrest team={fixture.away} />
+                        <strong>{fixture.away.name}</strong>
+                        {fixture.score && <b>{fixture.score.away}</b>}
+                      </div>
+                    </div>
+
+                    <div className="fixture-prices" aria-label="Current pool shares">
+                      {(["home", "draw", "away"] as const).map((outcome) => (
+                        <span key={outcome}>
+                          <small>{outcome === "draw" ? "Draw" : outcome === "home" ? "Home" : "Away"}</small>
+                          <strong>{hasResultLiquidity ? `${Math.round((shares[outcome] || 0) * 100)}%` : "—"}</strong>
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="fixture-pool">
+                      <small>Total pool</small>
+                      <strong>{hasLiquidity ? number.format(pool) : "First pick"}</strong>
+                      <span>{hasLiquidity ? stakeLabel : "opens evenly"}</span>
+                    </div>
+                    <span className="fixture-arrow" aria-hidden>→</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
+        {!loading && !error && shown.length === 0 && (
+          <div className="empty-state">
+            <strong>
+              {filter === "live"
+                ? "No match is live right now"
+                : filter === "next"
+                  ? "The next fixtures are being confirmed"
+                  : "No results yet"}
+            </strong>
+            <p>
+              {filter === "live"
+                ? "Switch to Next to line up your next prediction."
+                : "The board will update as soon as the match feed publishes them."}
+            </p>
+            {filter === "live" && (
+              <button type="button" className="btn btn-secondary" onClick={() => setFilter("next")}>
+                Show next matches
+              </button>
+            )}
+          </div>
+        )}
+      </section>
+    </>
   );
 }

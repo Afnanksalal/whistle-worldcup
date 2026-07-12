@@ -2,7 +2,8 @@
 
 Tournament-native World Cup prediction pools. Take a side, watch live scores, get paid at full-time — then roll into the next kickoff.
 
-**Repo:** [github.com/Afnanksalal/whistle-worldcup](https://github.com/Afnanksalal/whistle-worldcup)  
+**Repo:** [github.com/Afnanksalal/whistle-worldcup](https://github.com/Afnanksalal/whistle-worldcup)
+**Live:** [Whistle on Playground](https://membership-public-gave-racks.trycloudflare.com)
 **Deploy:** Playground VPS + Docker + Caddy (+ Cloudflare tunnel). No Vercel.
 
 Powered by [TxLINE](https://txline.txodds.com) sports data on Solana (with free [TheSportsDB](https://www.thesportsdb.com) schedule fallback). Built for the [Superteam World Cup — Prediction Markets & Settlement](https://superteam.fun/earn/listing/prediction-markets-and-settlement/) track.
@@ -24,7 +25,7 @@ Powered by [TxLINE](https://txline.txodds.com) sports data on Solana (with free 
 apps/web          Next.js product UI (VPS only)
 apps/api          Ingest, markets, keeper, WS, news, groups, admin API
 packages/shared   Shared types + resolution helpers
-programs/whistle  Anchor program (USDC escrow + settle/claim)
+programs/whistle  Anchor escrow prototype (not enabled in production)
 infra/playground  Docker Compose + Caddy production stack
 docs/             TECH, DEPLOY, DEMO, SUBMISSION, TASKS
 ```
@@ -82,3 +83,7 @@ Set `WHISTLE_PROGRAM_ID` when the program is live.
 ## Observability
 
 `GET /api/live` · `GET /api/ready` · `GET /api/health` · `GET /api/metrics`
+
+## Discovery
+
+`/sitemap.xml` · `/robots.txt` · `/llms.txt` · `/llms-full.txt` · `/manifest.webmanifest`

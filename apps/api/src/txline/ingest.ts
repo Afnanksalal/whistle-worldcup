@@ -13,17 +13,35 @@ import {
   sseUrl,
   txlineHeaders,
 } from "./client";
-import { fetchPublicFixtures } from "../fixtures/publicSchedule";
+import {
+  fetchPublicFixtures,
+  isCurrentWorldCupPublicFixture,
+} from "../fixtures/publicSchedule";
 import { getState, mutate } from "../store";
 import { maybeSettleFixture } from "../settlement/keeper";
-import { lockMarket, voidMarketsForFixture } from "../markets/service";
+import { enforceMarketCutoffs, voidMarketsForFixture } from "../markets/service";
 import { bumpMetric, getLogger, markIngest } from "../observability";
+import { isPlaceholderTxlineToken } from "../config";
 
 const log = () => getLogger().child({ module: "ingest" });
 
 export type FixtureSource = "txline" | "thesportsdb";
 
 let activeSource: FixtureSource = "txline";
+let publicBoardLoadedAt = 0;
+let publicBoardInFlight: Promise<void> | null = null;
+let lastTxlineRetryAt = 0;
+let activeSseKey: string | null = null;
+let activeSseStop: (() => void) | null = null;
+
+const PUBLIC_BOARD_TTL_MS = Math.max(
+  60_000,
+  Number(process.env.PUBLIC_SCHEDULE_REFRESH_MS || 10 * 60_000)
+);
+const TXLINE_RETRY_MS = Math.max(
+  60_000,
+  Number(process.env.TXLINE_RETRY_MS || 5 * 60_000)
+);
 
 export function getFixtureSource(): FixtureSource {
   return activeSource;
@@ -43,20 +61,58 @@ function wipeLegacyDemoIds(s: {
   }
 }
 
-async function loadPublicBoard() {
-  const fixtures = await fetchPublicFixtures();
-  activeSource = "thesportsdb";
-  mutate((s) => {
-    wipeLegacyDemoIds(s);
-    s.fixtures = {};
-    for (const f of fixtures) s.fixtures[f.id] = f;
-  }, "fixtures", fixtures);
-  markIngest();
-  log().info({ count: fixtures.length, source: activeSource }, "board ready");
+function wipePublicFallbackIds(s: {
+  fixtures: Record<string, Fixture>;
+  live: Record<string, unknown>;
+  odds: Record<string, unknown>;
+}) {
+  for (const id of Object.keys(s.fixtures)) {
+    if (!id.startsWith("tsdb-")) continue;
+    delete s.fixtures[id];
+    delete s.live[id];
+    delete s.odds[id];
+  }
+}
+
+async function loadPublicBoard(force = false) {
+  if (!force && Date.now() - publicBoardLoadedAt < PUBLIC_BOARD_TTL_MS) return;
+  if (publicBoardInFlight) return publicBoardInFlight;
+
+  publicBoardInFlight = (async () => {
+    try {
+      const fixtures = await fetchPublicFixtures();
+      activeSource = "thesportsdb";
+      mutate((s) => {
+        wipeLegacyDemoIds(s);
+        s.fixtures = {};
+        for (const f of fixtures) s.fixtures[f.id] = f;
+      }, "fixtures", fixtures);
+      publicBoardLoadedAt = Date.now();
+      markIngest();
+      log().info({ count: fixtures.length, source: activeSource }, "board ready");
+    } catch (error) {
+      const cached = Object.values(getState().fixtures).filter(
+        isCurrentWorldCupPublicFixture
+      );
+      if (!cached.length) throw error;
+      activeSource = "thesportsdb";
+      mutate((state) => {
+        state.fixtures = Object.fromEntries(cached.map((fixture) => [fixture.id, fixture]));
+      }, "fixtures", cached);
+      publicBoardLoadedAt = Date.now();
+      log().warn(
+        { err: error, count: cached.length },
+        "public schedule refresh failed; retained persisted board"
+      );
+    }
+  })().finally(() => {
+    publicBoardInFlight = null;
+  });
+  return publicBoardInFlight;
 }
 
 export async function bootstrapFixtures(cfg: TxlineConfig | null) {
-  if (cfg?.apiToken && !cfg.apiToken.startsWith("txl_")) {
+  if (cfg?.apiToken && !isPlaceholderTxlineToken(cfg.apiToken)) {
     // Prefer real TxLINE when token does not look like our local placeholder
     try {
       const fixtures = await fetchFixtures(cfg);
@@ -64,6 +120,7 @@ export async function bootstrapFixtures(cfg: TxlineConfig | null) {
       activeSource = "txline";
       mutate((s) => {
         wipeLegacyDemoIds(s);
+        wipePublicFallbackIds(s);
         for (const f of fixtures) s.fixtures[f.id] = f;
       }, "fixtures", fixtures);
       markIngest();
@@ -85,39 +142,39 @@ export async function bootstrapFixtures(cfg: TxlineConfig | null) {
       log().warn({ err }, "TxLINE bootstrap failed — using public sports API");
     }
   } else if (cfg?.apiToken) {
-    // Placeholder token: try TxLINE once, then public API
-    try {
-      const fixtures = await fetchFixtures(cfg);
-      if (fixtures.length) {
-        activeSource = "txline";
-        mutate((s) => {
-          wipeLegacyDemoIds(s);
-          for (const f of fixtures) s.fixtures[f.id] = f;
-        }, "fixtures", fixtures);
-        markIngest();
-        log().info({ count: fixtures.length }, "loaded TxLINE fixtures");
-        return;
-      }
-    } catch (err) {
-      log().warn({ err }, "placeholder TxLINE token rejected — public sports API");
-    }
+    log().info("placeholder TxLINE token configured — loading cached public schedule");
   }
 
-  await loadPublicBoard();
+  await loadPublicBoard(true);
 }
 
 export async function refreshFixtures(cfg: TxlineConfig | null) {
-  if (activeSource === "txline" && cfg?.apiToken) {
-    const fixtures = await fetchFixtures(cfg);
-    if (!fixtures.length) return;
-    mutate((s) => {
-      for (const f of fixtures) {
-        const prev = s.fixtures[f.id];
-        s.fixtures[f.id] = prev ? { ...prev, ...f, score: f.score ?? prev.score } : f;
-      }
-    }, "fixtures", fixtures);
-    markIngest();
-    return;
+  const realTxline = Boolean(
+    cfg?.apiToken && !isPlaceholderTxlineToken(cfg.apiToken)
+  );
+  const shouldTryTxline =
+    realTxline &&
+    (activeSource === "txline" || Date.now() - lastTxlineRetryAt >= TXLINE_RETRY_MS);
+
+  if (shouldTryTxline && cfg) {
+    lastTxlineRetryAt = Date.now();
+    try {
+      const fixtures = await fetchFixtures(cfg);
+      if (!fixtures.length) throw new Error("TxLINE returned zero fixtures");
+      activeSource = "txline";
+      mutate((s) => {
+        wipePublicFallbackIds(s);
+        for (const f of fixtures) {
+          const prev = s.fixtures[f.id];
+          s.fixtures[f.id] = prev ? { ...prev, ...f, score: f.score ?? prev.score } : f;
+        }
+      }, "fixtures", fixtures);
+      markIngest();
+      return;
+    } catch (error) {
+      if (activeSource === "txline") throw error;
+      log().warn({ err: error }, "TxLINE retry failed; retaining cached public board");
+    }
   }
   await loadPublicBoard();
 }
@@ -138,11 +195,7 @@ function applyScoreUpdate(update: ReturnType<typeof normalizeScoreUpdate>) {
   }, "score", update);
 
   if (update.status === "live") {
-    for (const m of Object.values(getState().markets)) {
-      if (m.fixtureId === update.fixtureId && m.status === "open") {
-        lockMarket(m.id);
-      }
-    }
+    enforceMarketCutoffs();
   }
 
   if (update.status === "cancelled" || update.status === "postponed") {
@@ -166,6 +219,10 @@ export function startSseIngest(cfg: TxlineConfig) {
     log().info("SSE skipped — board sourced from public sports API");
     return () => undefined;
   }
+
+  const streamKey = cfg.apiOrigin;
+  if (activeSseKey === streamKey && activeSseStop) return activeSseStop;
+  if (activeSseStop) activeSseStop();
 
   const scoresUrl = sseUrl(cfg, "scores");
   log().info({ scoresUrl }, "connecting scores SSE");
@@ -204,8 +261,9 @@ export function startSseIngest(cfg: TxlineConfig) {
     log().warn("scores SSE error — EventSource will retry");
   };
 
+  let oddsEs: EventSource | null = null;
   try {
-    const oddsEs = new EventSource(sseUrl(cfg, "odds"), {
+    oddsEs = new EventSource(sseUrl(cfg, "odds"), {
       fetch: (input, init) =>
         fetch(input, {
           ...init,
@@ -246,9 +304,23 @@ export function startSseIngest(cfg: TxlineConfig) {
         // ignore
       }
     };
+    oddsEs.onerror = () => {
+      bumpMetric("sseReconnects");
+      log().warn("odds SSE error — EventSource will retry");
+    };
   } catch (err) {
     log().warn({ err }, "odds SSE unavailable");
   }
 
-  return () => es.close();
+  const stop = () => {
+    es.close();
+    oddsEs?.close();
+    if (activeSseStop === stop) {
+      activeSseStop = null;
+      activeSseKey = null;
+    }
+  };
+  activeSseKey = streamKey;
+  activeSseStop = stop;
+  return stop;
 }

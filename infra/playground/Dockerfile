@@ -1,4 +1,4 @@
-FROM node:20-alpine AS deps
+FROM node:22-alpine AS deps
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY packages/shared/package.json ./packages/shared/
@@ -10,13 +10,16 @@ FROM deps AS build
 COPY packages/shared ./packages/shared
 COPY apps/api ./apps/api
 COPY apps/web ./apps/web
+ARG NEXT_PUBLIC_SITE_URL
+RUN test -n "$NEXT_PUBLIC_SITE_URL"
 ENV NEXT_PUBLIC_API_URL=
+ENV NEXT_PUBLIC_SITE_URL=$NEXT_PUBLIC_SITE_URL
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build -w @whistle/shared \
  && npm run build -w @whistle/api \
  && npm run build -w @whistle/web
 
-FROM node:20-alpine AS api
+FROM node:22-alpine AS api
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=4000
@@ -28,7 +31,7 @@ WORKDIR /app/apps/api
 EXPOSE 4000
 CMD ["node", "dist/index.js"]
 
-FROM node:20-alpine AS web
+FROM node:22-alpine AS web
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PORT=3000

@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 import {
   CreateMarketRequest,
   DepositRequest,
@@ -14,10 +14,22 @@ import {
 } from "@whistle/shared";
 import { getState, mutate } from "../store";
 import { recordMarketPrice } from "./prices";
+import {
+  enforceStateMarketCutoffs,
+  isFixtureStakeable,
+  marketIdentityKey,
+  reconcileStateMarkets,
+  type MarketReconcileOptions,
+} from "./lifecycle";
 
 function defaultOutcomes(marketType: MarketType): Record<string, number> {
   if (marketType === "match_result") return { home: 0, draw: 0, away: 0 };
   return { over: 0, under: 0 };
+}
+
+function stableMarketId(identity: string): string {
+  const hex = createHash("sha256").update(identity).digest("hex");
+  return `market-${hex.slice(0, 32)}`;
 }
 
 export function listMarkets(fixtureId?: string, squadId?: string): MarketPool[] {
@@ -30,21 +42,40 @@ export function listMarkets(fixtureId?: string, squadId?: string): MarketPool[] 
 
 export function ensureMarket(
   req: CreateMarketRequest,
-  opts?: { forcePublic?: boolean }
+  opts?: { forcePublic?: boolean; durable?: boolean }
 ): MarketPool {
-  const line = req.marketType === "total_goals" ? req.line ?? 2.5 : undefined;
-  const existing = Object.values(getState().markets).find(
-    (m) =>
-      m.fixtureId === req.fixtureId &&
-      m.marketType === req.marketType &&
-      m.line === line &&
-      (m.squadId || undefined) === (req.squadId || undefined) &&
-      m.status === "open"
+  const state = getState();
+  const fixture = state.fixtures[req.fixtureId];
+  if (!fixture) throw new Error("fixture not found");
+  if (!isFixtureStakeable(fixture)) {
+    throw new Error("markets can only be created before kickoff for scheduled fixtures");
+  }
+
+  const line =
+    req.marketType === "total_goals"
+      ? Math.round((req.line ?? 2.5) * 100) / 100
+      : undefined;
+  if (
+    req.marketType === "total_goals" &&
+    (!Number.isFinite(line) || line! <= 0 || !Number.isInteger(line! * 2))
+  ) {
+    throw new Error("total-goals line must be a positive half-goal line");
+  }
+
+  const squadId = opts?.forcePublic ? undefined : req.squadId;
+  const identity = marketIdentityKey({
+    fixtureId: req.fixtureId,
+    marketType: req.marketType,
+    line,
+    squadId,
+  });
+  const existing = Object.values(state.markets).find(
+    (market) => marketIdentityKey(market) === identity
   );
   if (existing) return existing;
 
   const market: MarketPool = {
-    id: randomUUID(),
+    id: stableMarketId(identity),
     fixtureId: req.fixtureId,
     marketType: req.marketType,
     line,
@@ -52,11 +83,11 @@ export function ensureMarket(
     outcomes: defaultOutcomes(req.marketType),
     totalPool: 0,
     createdAt: Date.now(),
-    squadId: opts?.forcePublic ? undefined : req.squadId,
+    squadId,
   };
   mutate((s) => {
     s.markets[market.id] = market;
-  }, "market", market);
+  }, "market", market, { durable: opts?.durable !== false });
   recordMarketPrice(market.id);
   return market;
 }
@@ -67,6 +98,10 @@ export function deposit(req: DepositRequest): { market: MarketPool; position: Po
   const market = state.markets[req.marketId];
   if (!market) throw new Error("market not found");
   if (market.status !== "open") throw new Error("market not open");
+  const fixture = state.fixtures[market.fixtureId];
+  if (!isFixtureStakeable(fixture)) {
+    throw new Error("market closed at kickoff");
+  }
   if (!(req.outcome in market.outcomes)) throw new Error("invalid outcome");
 
   const position: Position = {
@@ -84,7 +119,7 @@ export function deposit(req: DepositRequest): { market: MarketPool; position: Po
     m.outcomes[req.outcome] = (m.outcomes[req.outcome] || 0) + req.amount;
     m.totalPool += req.amount;
     s.positions[position.id] = position;
-  }, "deposit", { marketId: market.id, position });
+  }, "deposit", { marketId: market.id, position }, { durable: true });
 
   recordMarketPrice(req.marketId);
 
@@ -123,7 +158,7 @@ export function settleMarketOffchain(
     m.winningOutcome = winning;
     m.settledAt = Date.now();
     m.settleTxSig = settleTxSig;
-  }, "settled", { marketId, winning });
+  }, "settled", { marketId, winning }, { durable: true });
 
   return getState().markets[marketId];
 }
@@ -137,17 +172,35 @@ export function voidMarket(marketId: string, reason = "match abandoned") {
     const m = s.markets[marketId];
     m.status = "void";
     m.settledAt = Date.now();
-  }, "void", { marketId, reason });
+  }, "void", { marketId, reason }, { durable: true });
 
   return getState().markets[marketId];
 }
 
 export function voidMarketsForFixture(fixtureId: string, reason?: string) {
-  const markets = Object.values(getState().markets).filter(
+  const marketIds = Object.values(getState().markets)
+    .filter(
     (m) =>
       m.fixtureId === fixtureId && (m.status === "open" || m.status === "locked")
+    )
+    .map((market) => market.id);
+  if (!marketIds.length) return [];
+
+  const settledAt = Date.now();
+  mutate(
+    (s) => {
+      for (const marketId of marketIds) {
+        const market = s.markets[marketId];
+        if (!market || (market.status !== "open" && market.status !== "locked")) continue;
+        market.status = "void";
+        market.settledAt = settledAt;
+      }
+    },
+    "fixture_markets_voided",
+    { fixtureId, marketIds, reason: reason || "match abandoned" },
+    { durable: true }
   );
-  return markets.map((m) => voidMarket(m.id, reason));
+  return marketIds.map((marketId) => getState().markets[marketId]).filter(Boolean);
 }
 
 export function lockMarket(marketId: string) {
@@ -156,7 +209,7 @@ export function lockMarket(marketId: string) {
   if (market.status !== "open") return market;
   mutate((s) => {
     s.markets[marketId].status = "locked";
-  }, "locked", { marketId });
+  }, "locked", { marketId }, { durable: true });
   return getState().markets[marketId];
 }
 
@@ -173,7 +226,7 @@ export function claimPosition(positionId: string, owner: string) {
     const payout = position.amount;
     mutate((s) => {
       s.positions[positionId].claimed = true;
-    }, "claim", { positionId, payout, refund: true });
+    }, "claim", { positionId, payout, refund: true }, { durable: true });
     return { position: getState().positions[positionId], payout, won: false, refund: true };
   }
 
@@ -191,7 +244,7 @@ export function claimPosition(positionId: string, owner: string) {
 
   mutate((s) => {
     s.positions[positionId].claimed = true;
-  }, "claim", { positionId, payout });
+  }, "claim", { positionId, payout }, { durable: true });
 
   return { position: getState().positions[positionId], payout, won, refund: false };
 }
@@ -207,7 +260,7 @@ export function createSquad(name: string, creator: string): Squad {
   };
   mutate((s) => {
     s.squads[squad.id] = squad;
-  }, "squad", squad);
+  }, "squad", squad, { durable: true });
   return squad;
 }
 
@@ -219,8 +272,49 @@ export function joinSquad(inviteCode: string, member: string): Squad {
   mutate((s) => {
     const sq = s.squads[squad.id];
     if (!sq.members.includes(member)) sq.members.push(member);
-  }, "squad", squad);
+  }, "squad", squad, { durable: true });
   return getState().squads[squad.id];
+}
+
+export function reconcileMarkets(options: MarketReconcileOptions) {
+  let summary = reconcileStateMarkets(structuredClone(getState()), options);
+  if (!summary.deleted && !summary.voided && !summary.locked) return summary;
+
+  mutate(
+    (s) => {
+      summary = reconcileStateMarkets(s, options);
+    },
+    "markets_reconciled",
+    { reason: "lifecycle safety reconciliation" },
+    { durable: true }
+  );
+  return summary;
+}
+
+export function enforceMarketCutoffs(now = Date.now()): number {
+  let locked = 0;
+  const state = getState();
+  const shouldLock = Object.values(state.markets).some((market) => {
+    if (market.status !== "open") return false;
+    const fixture = state.fixtures[market.fixtureId];
+    return Boolean(
+      fixture &&
+        (fixture.status === "live" ||
+          fixture.status === "finished" ||
+          (fixture.status === "scheduled" && fixture.kickoffTs <= now))
+    );
+  });
+  if (!shouldLock) return 0;
+
+  mutate(
+    (s) => {
+      locked = enforceStateMarketCutoffs(s, now);
+    },
+    "markets_locked",
+    { reason: "kickoff cutoff" },
+    { durable: true }
+  );
+  return locked;
 }
 
 export function squadLeaderboard(squadId: string) {

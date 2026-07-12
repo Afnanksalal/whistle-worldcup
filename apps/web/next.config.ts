@@ -1,6 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  poweredByHeader: false,
   transpilePackages: ["@whistle/shared"],
   webpack: (config) => {
     config.resolve.fallback = {

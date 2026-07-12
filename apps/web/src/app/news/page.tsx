@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { api, formatKickoff } from "../../lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { api } from "../../lib/api";
 
 type NewsArticle = {
   id: string;
@@ -13,65 +13,365 @@ type NewsArticle = {
   publishedAt: string;
 };
 
-export default function NewsPage() {
-  const [articles, setArticles] = useState<NewsArticle[]>([]);
-  const [source, setSource] = useState<string>("");
-  const [error, setError] = useState<string | null>(null);
+type NewsResponse = {
+  articles: NewsArticle[];
+  source: string;
+};
+
+type LoadState = "loading" | "ready" | "error";
+
+const ALL_SOURCES = "__all__";
+
+function sourceLabel(source: string) {
+  return source.trim() || "News desk";
+}
+
+function sourceMonogram(source: string) {
+  const words = sourceLabel(source)
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  return words.map((word) => word[0]).join("").toUpperCase();
+}
+
+function formatPublishedAt(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "Recently published";
+
+  return new Intl.DateTimeFormat(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(date);
+}
+
+function articleLinkLabel(article: NewsArticle) {
+  return `Read ${article.title} at ${sourceLabel(article.source)} (opens in a new tab)`;
+}
+
+function ArticleImage({
+  article,
+  featured = false,
+}: {
+  article: NewsArticle;
+  featured?: boolean;
+}) {
+  const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
-    api<{ articles: NewsArticle[]; source: string }>("/news")
-      .then((r) => {
-        setArticles(r.articles);
-        setSource(r.source);
-        setError(null);
-      })
-      .catch((e) => setError(String(e)));
-  }, []);
+    setImageFailed(false);
+  }, [article.imageUrl]);
+
+  const showImage = Boolean(article.imageUrl) && !imageFailed;
+  const className = [
+    "news-image",
+    featured ? "news-image--featured" : "news-image--card",
+    showImage ? "" : "is-fallback",
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
-    <main className="shell" style={{ padding: "2rem 0 4rem" }}>
-      <p className="eyebrow" style={{ marginBottom: "0.5rem" }}>
-        Wire
-      </p>
-      <h1 className="display rise" style={{ fontSize: "2.1rem", marginBottom: "0.35rem" }}>
-        World Cup news
-      </h1>
-      <p style={{ color: "var(--mute)", maxWidth: 520, marginTop: 0 }}>
-        Live headlines from the news pipeline
-        {source ? ` · source ${source}` : ""}. Cached server-side for ten minutes.
-      </p>
-
-      {error && (
-        <div className="panel" style={{ padding: "1rem", color: "var(--signal)" }}>
-          {error}
+    <div className={className} aria-hidden="true">
+      {showImage ? (
+        // News images come from arbitrary publisher hosts, so next/image cannot safely
+        // optimize them without maintaining an incomplete remote-host allowlist.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          className="news-image__asset"
+          src={article.imageUrl || undefined}
+          alt=""
+          loading={featured ? "eager" : "lazy"}
+          decoding="async"
+          fetchPriority={featured ? "high" : "auto"}
+          onError={() => setImageFailed(true)}
+        />
+      ) : (
+        <div className="news-image__fallback">
+          <span className="news-image__fallback-mark">{sourceMonogram(article.source)}</span>
+          <span className="news-image__fallback-label">Matchday desk</span>
         </div>
       )}
+    </div>
+  );
+}
 
-      <div style={{ display: "grid", gap: "0.75rem", marginTop: "1.5rem" }}>
-        {articles.map((a) => (
-          <a
-            key={a.id}
-            href={a.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="panel"
-            style={{ padding: "1.1rem 1.2rem", display: "block" }}
-          >
-            <div className="mono" style={{ color: "var(--mute)", fontSize: "0.7rem", marginBottom: "0.35rem" }}>
-              {a.source} · {formatKickoff(new Date(a.publishedAt).getTime())}
-            </div>
-            <div className="display" style={{ fontSize: "1.15rem", marginBottom: "0.35rem" }}>
-              {a.title}
-            </div>
-            {a.description && (
-              <p style={{ color: "var(--mute)", margin: 0, fontSize: "0.9rem", lineHeight: 1.45 }}>
-                {a.description}
+function StoryMeta({ article }: { article: NewsArticle }) {
+  return (
+    <p className="news-story-meta">
+      <span className="news-story-meta__source">{sourceLabel(article.source)}</span>
+      <span className="news-story-meta__divider" aria-hidden="true">
+        /
+      </span>
+      <time
+        className="news-story-meta__time"
+        dateTime={article.publishedAt}
+        suppressHydrationWarning
+      >
+        {formatPublishedAt(article.publishedAt)}
+      </time>
+    </p>
+  );
+}
+
+export default function NewsPage() {
+  const [articles, setArticles] = useState<NewsArticle[]>([]);
+  const [feedSource, setFeedSource] = useState("");
+  const [activeSource, setActiveSource] = useState(ALL_SOURCES);
+  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [requestVersion, setRequestVersion] = useState(0);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    async function loadArticles() {
+      setLoadState("loading");
+
+      try {
+        const response = await api<NewsResponse>("/news", {
+          signal: controller.signal,
+        });
+
+        if (controller.signal.aborted) return;
+
+        setArticles(response.articles);
+        setFeedSource(response.source);
+        setActiveSource((current) =>
+          current === ALL_SOURCES ||
+          response.articles.some((article) => sourceLabel(article.source) === current)
+            ? current
+            : ALL_SOURCES
+        );
+        setLoadState("ready");
+      } catch {
+        if (!controller.signal.aborted) setLoadState("error");
+      }
+    }
+
+    void loadArticles();
+    return () => controller.abort();
+  }, [requestVersion]);
+
+  const sortedArticles = useMemo(
+    () =>
+      [...articles].sort((a, b) => {
+        const aTime = Date.parse(a.publishedAt) || 0;
+        const bTime = Date.parse(b.publishedAt) || 0;
+        return bTime - aTime;
+      }),
+    [articles]
+  );
+
+  const sources = useMemo(
+    () =>
+      Array.from(
+        new Set(sortedArticles.map((article) => sourceLabel(article.source)))
+      ).sort((a, b) => a.localeCompare(b)),
+    [sortedArticles]
+  );
+
+  const filteredArticles = useMemo(
+    () =>
+      activeSource === ALL_SOURCES
+        ? sortedArticles
+        : sortedArticles.filter(
+            (article) => sourceLabel(article.source) === activeSource
+          ),
+    [activeSource, sortedArticles]
+  );
+
+  const featuredArticle = filteredArticles[0];
+  const latestArticles = filteredArticles.slice(1);
+  const storyCountLabel = `${filteredArticles.length} ${
+    filteredArticles.length === 1 ? "story" : "stories"
+  }`;
+
+  const retry = () => setRequestVersion((version) => version + 1);
+
+  return (
+    <main id="main-content" className="news-page">
+      <div className="shell news-page__shell">
+        <header className="news-masthead">
+          <div className="news-masthead__topline">
+            <p className="news-masthead__kicker">Matchday briefing</p>
+            {loadState === "ready" && articles.length > 0 && (
+              <p
+                className="news-masthead__feed"
+                title={feedSource ? `Feed: ${feedSource}` : undefined}
+              >
+                <span className="news-masthead__feed-dot" aria-hidden="true" />
+                {sources.length} {sources.length === 1 ? "source" : "sources"} reporting
               </p>
             )}
-          </a>
-        ))}
-        {!articles.length && !error && (
-          <p style={{ color: "var(--mute)" }}>No articles yet — check NEWS_API_KEY or RSS connectivity.</p>
+          </div>
+          <h1 className="news-masthead__title">The World Cup desk</h1>
+          <p className="news-masthead__dek">
+            Team news, tournament context, and the stories shaping the next kickoff.
+          </p>
+        </header>
+
+        {loadState === "loading" && (
+          <section
+            className="news-state news-state--loading"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <p className="news-state__label">Live desk</p>
+            <h2 className="news-state__title">Gathering the latest reports</h2>
+            <p className="news-state__copy">
+              Pulling together the newest tournament coverage from trusted publishers.
+            </p>
+            <div className="news-loading-grid" aria-hidden="true">
+              <span className="news-loading-card news-loading-card--featured" />
+              <span className="news-loading-card" />
+              <span className="news-loading-card" />
+            </div>
+          </section>
+        )}
+
+        {loadState === "error" && (
+          <section className="news-state news-state--error" role="alert">
+            <p className="news-state__label">Feed unavailable</p>
+            <h2 className="news-state__title">The desk missed an update</h2>
+            <p className="news-state__copy">
+              Latest stories are temporarily unavailable. Try the feed again in a moment.
+            </p>
+            <button className="news-state__action" type="button" onClick={retry}>
+              Try again
+            </button>
+          </section>
+        )}
+
+        {loadState === "ready" && articles.length === 0 && (
+          <section className="news-state news-state--empty">
+            <p className="news-state__label">Between updates</p>
+            <h2 className="news-state__title">No fresh stories yet</h2>
+            <p className="news-state__copy">
+              New tournament coverage will appear here as soon as publishers file it.
+            </p>
+            <button className="news-state__action" type="button" onClick={retry}>
+              Refresh news
+            </button>
+          </section>
+        )}
+
+        {loadState === "ready" && featuredArticle && (
+          <>
+            <section className="news-controls" aria-labelledby="news-source-heading">
+              <div className="news-controls__heading">
+                <h2 className="news-controls__title" id="news-source-heading">
+                  Sources
+                </h2>
+                <p className="news-controls__count" aria-live="polite">
+                  {storyCountLabel}
+                </p>
+              </div>
+              <div
+                className="news-source-filters"
+                role="group"
+                aria-labelledby="news-source-heading"
+              >
+                <button
+                  className={`news-source-filter${
+                    activeSource === ALL_SOURCES ? " is-active" : ""
+                  }`}
+                  type="button"
+                  aria-pressed={activeSource === ALL_SOURCES}
+                  onClick={() => setActiveSource(ALL_SOURCES)}
+                >
+                  All sources
+                </button>
+                {sources.map((source) => (
+                  <button
+                    className={`news-source-filter${
+                      activeSource === source ? " is-active" : ""
+                    }`}
+                    key={source}
+                    type="button"
+                    aria-pressed={activeSource === source}
+                    onClick={() => setActiveSource(source)}
+                  >
+                    {source}
+                  </button>
+                ))}
+              </div>
+            </section>
+
+            <section className="news-feature" aria-labelledby="featured-story-title">
+              <p className="news-section-label">Top story</p>
+              <article className="news-feature__story">
+                <a
+                  className="news-feature__link"
+                  href={featuredArticle.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  aria-label={articleLinkLabel(featuredArticle)}
+                >
+                  <ArticleImage article={featuredArticle} featured />
+                  <div className="news-feature__content">
+                    <StoryMeta article={featuredArticle} />
+                    <h2 className="news-feature__title" id="featured-story-title">
+                      {featuredArticle.title}
+                    </h2>
+                    {featuredArticle.description && (
+                      <p className="news-feature__description">
+                        {featuredArticle.description}
+                      </p>
+                    )}
+                    <span className="news-story-cta">
+                      Read at {sourceLabel(featuredArticle.source)}
+                      <span className="news-story-cta__icon" aria-hidden="true">
+                        ↗
+                      </span>
+                    </span>
+                  </div>
+                </a>
+              </article>
+            </section>
+
+            {latestArticles.length > 0 && (
+              <section className="news-latest" aria-labelledby="latest-stories-title">
+                <header className="news-latest__header">
+                  <h2 className="news-latest__title" id="latest-stories-title">
+                    Latest reports
+                  </h2>
+                  <p className="news-latest__summary">
+                    Fresh context for the fixtures and teams in play.
+                  </p>
+                </header>
+                <div className="news-grid">
+                  {latestArticles.map((article) => (
+                    <article className="news-card" key={article.id}>
+                      <a
+                        className="news-card__link"
+                        href={article.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        aria-label={articleLinkLabel(article)}
+                      >
+                        <ArticleImage article={article} />
+                        <div className="news-card__content">
+                          <StoryMeta article={article} />
+                          <h3 className="news-card__title">{article.title}</h3>
+                          {article.description && (
+                            <p className="news-card__description">{article.description}</p>
+                          )}
+                          <span className="news-story-cta news-card__cta">
+                            Read story
+                            <span className="news-story-cta__icon" aria-hidden="true">
+                              ↗
+                            </span>
+                          </span>
+                        </div>
+                      </a>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )}
+          </>
         )}
       </div>
     </main>

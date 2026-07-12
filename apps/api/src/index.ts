@@ -8,7 +8,7 @@ import rateLimit from "express-rate-limit";
 import pinoHttp from "pino-http";
 import { WebSocketServer } from "ws";
 import { createRouter, requestContext } from "./routes";
-import { subscribe } from "./store";
+import { flushStateSync, getState, subscribe } from "./store";
 import {
   bootstrapFixtures,
   getFixtureSource,
@@ -17,9 +17,13 @@ import {
 } from "./txline/ingest";
 import { networkConfig, refreshGuestJwt } from "./txline/client";
 import { configureKeeper, startKeeperLoop } from "./settlement/keeper";
-import { ensureMarket } from "./markets/service";
-import { getState } from "./store";
-import { loadConfig, publicMeta } from "./config";
+import {
+  enforceMarketCutoffs,
+  ensureMarket,
+  reconcileMarkets,
+} from "./markets/service";
+import { isFixtureStakeable } from "./markets/lifecycle";
+import { isPlaceholderTxlineToken, loadConfig, publicMeta } from "./config";
 import { configureLogger, getLogger } from "./observability";
 import { snapshotAllOpenMarkets, recordMarketPrice } from "./markets/prices";
 import { refreshLiveFixtureStats } from "./match/stats";
@@ -36,7 +40,7 @@ async function main() {
 
   const net = networkConfig(cfg.network);
   const apiOrigin = cfg.apiOrigin || net.apiOrigin;
-  const placeholder = cfg.apiToken.startsWith("txl_");
+  const placeholder = isPlaceholderTxlineToken(cfg.apiToken);
 
   let guestJwt = cfg.guestJwt;
   if (!guestJwt && !placeholder) {
@@ -55,42 +59,71 @@ async function main() {
         ? { apiOrigin, guestJwt: guestJwt || "pending", apiToken: cfg.apiToken }
         : null;
 
-  configureKeeper(placeholder ? null : txlineCfg, cfg.keepSettleEnabled);
-
   await bootstrapFixtures(txlineCfg);
 
-  for (const f of Object.values(getState().fixtures)) {
-    if (f.status === "cancelled" || f.status === "postponed") continue;
-    ensureMarket({ fixtureId: f.id, marketType: "match_result" });
-    ensureMarket({ fixtureId: f.id, marketType: "total_goals", line: 2.5 });
-  }
+  const verifiedTxlineConfig = () =>
+    !placeholder && getFixtureSource() === "txline" ? txlineCfg : null;
+  const syncKeeperConfig = () =>
+    configureKeeper(verifiedTxlineConfig(), cfg.keepSettleEnabled);
+  const ensureScheduledMarkets = () => {
+    for (const fixture of Object.values(getState().fixtures)) {
+      if (!isFixtureStakeable(fixture)) continue;
+      ensureMarket(
+        { fixtureId: fixture.id, marketType: "match_result" },
+        { durable: false }
+      );
+      ensureMarket(
+        { fixtureId: fixture.id, marketType: "total_goals", line: 2.5 },
+        { durable: false }
+      );
+    }
+  };
+  const reconcileLifecycle = () => {
+    const summary = reconcileMarkets({
+      resultVerificationAvailable: Boolean(verifiedTxlineConfig()),
+    });
+    if (summary.deleted || summary.voided || summary.locked) {
+      log.warn({ summary }, "market lifecycle state reconciled");
+    }
+  };
+
+  syncKeeperConfig();
+  reconcileLifecycle();
+  ensureScheduledMarkets();
 
   // Seed price history so graphs are never empty on first paint
   for (const m of Object.values(getState().markets)) {
     recordMarketPrice(m.id);
   }
 
+  let stopSse: (() => void) | null = null;
+  const syncSse = () => {
+    const verified = verifiedTxlineConfig();
+    if (verified && guestJwt) {
+      stopSse = startSseIngest(verified);
+    }
+  };
   if (getFixtureSource() === "txline" && txlineCfg && guestJwt) {
-    startSseIngest({ ...txlineCfg, guestJwt });
+    syncSse();
   }
 
-  setInterval(() => {
+  const timers: NodeJS.Timeout[] = [];
+  timers.push(setInterval(() => {
     void refreshFixtures(txlineCfg)
       .then(() => {
-        for (const f of Object.values(getState().fixtures)) {
-          if (f.status === "cancelled" || f.status === "postponed") continue;
-          ensureMarket({ fixtureId: f.id, marketType: "match_result" });
-          ensureMarket({ fixtureId: f.id, marketType: "total_goals", line: 2.5 });
-        }
+        syncKeeperConfig();
+        reconcileLifecycle();
+        ensureScheduledMarkets();
+        syncSse();
       })
       .catch((e) => log.warn({ err: e }, "fixture refresh failed"));
-  }, 60_000);
+  }, 60_000));
 
-  setInterval(() => snapshotAllOpenMarkets(), 20_000);
-  setInterval(() => {
+  timers.push(setInterval(() => snapshotAllOpenMarkets(), 20_000));
+  timers.push(setInterval(() => {
     void refreshLiveFixtureStats().catch((e) => log.warn({ err: e }, "stats refresh failed"));
-  }, 45_000);
-  setInterval(() => {
+  }, 45_000));
+  timers.push(setInterval(() => {
     const liveIds = Object.values(getState().fixtures)
       .filter((f) => f.status === "live" || f.status === "scheduled")
       .slice(0, 10)
@@ -98,7 +131,11 @@ async function main() {
     for (const id of liveIds) {
       void buildInsights(id).catch(() => undefined);
     }
-  }, 90_000);
+  }, 90_000));
+  timers.push(setInterval(() => {
+    const locked = enforceMarketCutoffs();
+    if (locked) log.info({ locked }, "markets locked at kickoff cutoff");
+  }, 1_000));
 
   // Warm stats + insights for first board page
   void refreshLiveFixtureStats()
@@ -109,7 +146,7 @@ async function main() {
     })
     .catch(() => undefined);
 
-  startKeeperLoop(15_000);
+  timers.push(startKeeperLoop(15_000));
 
   const app = express();
   app.disable("x-powered-by");
@@ -158,8 +195,26 @@ async function main() {
     );
   });
 
-  subscribe((event, payload) => {
-    const msg = JSON.stringify({ event, payload });
+  const publicSocketEvents = new Set([
+    "fixtures",
+    "fixture",
+    "score",
+    "scores",
+    "odds",
+    "market",
+    "locked",
+    "settled",
+    "void",
+    "price",
+    "stats",
+    "insights",
+  ]);
+
+  subscribe((event) => {
+    if (!publicSocketEvents.has(event)) return;
+    // Public clients only need an invalidation signal. Never fan out owners,
+    // invite codes, position data, or private squad payloads.
+    const msg = JSON.stringify({ event });
     for (const client of wss.clients) {
       if (client.readyState === 1) client.send(msg);
     }
@@ -174,6 +229,31 @@ async function main() {
       `Whistle API listening on :${cfg.port}`
     );
   });
+
+  let shuttingDown = false;
+  const shutdown = (signal: string) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    log.info({ signal }, "shutting down");
+    for (const timer of timers) clearInterval(timer);
+    stopSse?.();
+    server.close(() => {
+      try {
+        flushStateSync();
+      } finally {
+        process.exit(0);
+      }
+    });
+    setTimeout(() => {
+      try {
+        flushStateSync();
+      } finally {
+        process.exit(1);
+      }
+    }, 10_000).unref();
+  };
+  process.once("SIGTERM", () => shutdown("SIGTERM"));
+  process.once("SIGINT", () => shutdown("SIGINT"));
 }
 
 main().catch((err) => {

@@ -2,64 +2,72 @@
 
 import type { InsightCard } from "@whistle/shared";
 
+function relativeTime(ts?: number) {
+  if (!ts) return null;
+  const minutes = Math.max(0, Math.round((Date.now() - ts) / 60_000));
+  if (minutes < 1) return "now";
+  if (minutes < 60) return `${minutes}m ago`;
+  return `${Math.round(minutes / 60)}h ago`;
+}
+
 export function InsightsPanel({ insights }: { insights: InsightCard[] }) {
+  const hasNarrative = insights.some((insight) => insight.source === "llm");
+
   return (
-    <div className="panel" style={{ padding: "1.2rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "0.85rem" }}>
-        <h2 className="display" style={{ fontSize: "1.1rem", margin: 0 }}>
-          AI insights
-        </h2>
-        <span className="mono" style={{ color: "var(--mute)", fontSize: "0.68rem" }}>
-          ENGINE{insights.some((i) => i.source === "llm") ? " + LLM" : ""}
-        </span>
-      </div>
+    <section className="panel intelligence-panel" aria-labelledby="intelligence-title">
+      <header className="intelligence-header">
+        <div>
+          <p className="section-kicker">What is changing</p>
+          <h2 id="intelligence-title">Match intelligence</h2>
+        </div>
+        <span>{hasNarrative ? "Grounded AI + data" : "Data-backed"}</span>
+      </header>
+
       {!insights.length && (
-        <p style={{ color: "var(--mute)", margin: 0 }}>
-          Building desk notes from pool, stats, table, and wire…
-        </p>
+        <div className="intelligence-empty">
+          <strong>Waiting for a real signal</strong>
+          <p>Pool movement, verified match events, and relevant team news will appear here.</p>
+        </div>
       )}
-      <div style={{ display: "grid", gap: "0.65rem" }}>
+
+      <div className="intelligence-list">
         {insights.map((card) => (
           <article
             key={card.id}
-            style={{
-              padding: "0.85rem 0.95rem",
-              borderRadius: "0.65rem",
-              border: "1px solid var(--line)",
-              background:
-                card.severity === "alert"
-                  ? "rgba(251,113,133,0.08)"
-                  : card.severity === "signal"
-                    ? "rgba(45,212,191,0.07)"
-                    : "transparent",
-            }}
+            className={`intelligence-card is-${card.severity}${card.reason ? " is-waiting" : ""}`}
           >
-            <div
-              className="mono"
-              style={{
-                fontSize: "0.65rem",
-                letterSpacing: "0.08em",
-                color:
-                  card.severity === "alert"
-                    ? "var(--signal)"
-                    : card.severity === "signal"
-                      ? "var(--cyan)"
-                      : "var(--mute)",
-                marginBottom: "0.35rem",
-              }}
-            >
-              {card.severity.toUpperCase()}
-              {card.tags.length ? ` · ${card.tags.join(" · ")}` : ""}
+            <div className="intelligence-card-meta">
+              <span>{card.source === "llm" ? "AI desk note" : card.tags[0] || "Match data"}</span>
+              <span suppressHydrationWarning>
+                {card.confidence ? `${card.confidence} confidence` : "Observed"}
+                {relativeTime(card.asOf || card.ts) ? ` · ${relativeTime(card.asOf || card.ts)}` : ""}
+              </span>
             </div>
-            <h3 className="display" style={{ fontSize: "1rem", margin: "0 0 0.35rem" }}>
-              {card.title}
-            </h3>
-            <p style={{ margin: 0, color: "var(--mute)", fontSize: "0.9rem", lineHeight: 1.45 }}>
-              {card.body}
-            </p>
+            <h3>{card.title}</h3>
+            <p>{card.body}</p>
+            {!!card.evidence?.length && (
+              <div className="intelligence-evidence" aria-label="Evidence sources">
+                {card.evidence.slice(0, 3).map((evidence, index) =>
+                  evidence.url ? (
+                    <a
+                      key={`${evidence.kind}-${index}`}
+                      href={evidence.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      {evidence.label} ↗
+                    </a>
+                  ) : (
+                    <span key={`${evidence.kind}-${index}`}>
+                      {evidence.label} · {evidence.source}
+                    </span>
+                  )
+                )}
+              </div>
+            )}
           </article>
         ))}
       </div>
-    </div>
+    </section>
   );
 }

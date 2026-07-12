@@ -12,6 +12,11 @@ export type TxlineConfig = {
   apiToken: string;
 };
 
+const REQUEST_TIMEOUT_MS = Math.max(
+  2_000,
+  Number(process.env.TXLINE_REQUEST_TIMEOUT_MS || 8_000)
+);
+
 function headers(cfg: TxlineConfig): Record<string, string> {
   return {
     Authorization: `Bearer ${cfg.guestJwt}`,
@@ -25,7 +30,10 @@ export function networkConfig(network: string) {
 }
 
 export async function refreshGuestJwt(apiOrigin: string): Promise<string> {
-  const res = await fetch(`${apiOrigin}/auth/guest/start`, { method: "POST" });
+  const res = await fetch(`${apiOrigin}/auth/guest/start`, {
+    method: "POST",
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
   if (!res.ok) throw new Error(`guest/start failed: ${res.status}`);
   const data = (await res.json()) as { token?: string };
   if (!data.token) throw new Error("guest/start missing token");
@@ -33,11 +41,17 @@ export async function refreshGuestJwt(apiOrigin: string): Promise<string> {
 }
 
 async function getJson<T>(url: string, cfg: TxlineConfig): Promise<T> {
-  let res = await fetch(url, { headers: headers(cfg) });
+  let res = await fetch(url, {
+    headers: headers(cfg),
+    signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+  });
   if (res.status === 401) {
     const jwt = await refreshGuestJwt(cfg.apiOrigin);
     cfg.guestJwt = jwt;
-    res = await fetch(url, { headers: headers(cfg) });
+    res = await fetch(url, {
+      headers: headers(cfg),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    });
   }
   if (!res.ok) {
     const body = await res.text();
@@ -97,8 +111,7 @@ export function normalizeFixture(raw: unknown): Fixture | null {
   const away =
     teamFrom(o.away ?? o.awayTeam ?? o.AwayTeam ?? o.team2, "Away");
 
-  const kickoff =
-    pickNumber(o, [
+  const kickoff = pickNumber(o, [
       "kickoffTs",
       "kickoff",
       "startTs",
@@ -106,7 +119,9 @@ export function normalizeFixture(raw: unknown): Fixture | null {
       "StartTime",
       "ts",
       "scheduledTs",
-    ]) ?? Date.now();
+    ]);
+  // A fabricated "now" kickoff opens/closes markets at arbitrary times.
+  if (kickoff === undefined) return null;
 
   const statusRaw = (pickString(o, ["status", "Status", "state"]) || "").toLowerCase();
   let status: Fixture["status"] = "scheduled";
@@ -153,33 +168,55 @@ export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
 
   const homeScore =
     pickNumber(o, ["homeScore", "HomeScore", "scoreHome", "home"]) ??
-    pickNumber((o.score as Record<string, unknown>) || {}, ["home", "Home"]) ??
-    0;
+    pickNumber((o.score as Record<string, unknown>) || {}, ["home", "Home"]);
   const awayScore =
     pickNumber(o, ["awayScore", "AwayScore", "scoreAway", "away"]) ??
-    pickNumber((o.score as Record<string, unknown>) || {}, ["away", "Away"]) ??
-    0;
+    pickNumber((o.score as Record<string, unknown>) || {}, ["away", "Away"]);
 
   const statusId = pickNumber(o, ["statusId", "StatusId", "status_id"]);
   const action = pickString(o, ["action", "Action", "event"]);
   const period = pickString(o, ["period", "Period"]) ?? pickNumber(o, ["period", "Period"]);
 
-  let status: Fixture["status"] = "live";
-  if (isFinalScoreRecord({ action, statusId, period })) status = "finished";
+  let status: Fixture["status"] = "unknown";
   const statusRaw = (pickString(o, ["status", "Status"]) || "").toLowerCase();
-  if (statusRaw.includes("final") || statusRaw.includes("finished")) status = "finished";
-  if (statusRaw.includes("schedul") || statusRaw.includes("pre")) status = "scheduled";
+  if (statusRaw.includes("cancel") || statusRaw.includes("abandon")) {
+    status = "cancelled";
+  } else if (statusRaw.includes("postpon")) {
+    status = "postponed";
+  } else if (
+    statusRaw.includes("final") ||
+    statusRaw.includes("finished") ||
+    isFinalScoreRecord({ action, statusId, period })
+  ) {
+    status = "finished";
+  } else if (statusRaw.includes("schedul") || statusRaw.includes("pre")) {
+    status = "scheduled";
+  } else if (
+    statusRaw.includes("live") ||
+    statusRaw.includes("inplay") ||
+    statusRaw.includes("progress") ||
+    action?.toLowerCase().includes("score")
+  ) {
+    status = "live";
+  }
+
+  const scoreOptional = status === "cancelled" || status === "postponed";
+  if (!scoreOptional && (homeScore === undefined || awayScore === undefined)) {
+    return null;
+  }
+
+  const rawTs = pickNumber(o, ["ts", "timestamp", "Timestamp"]) ?? Date.now();
 
   return {
     fixtureId,
-    homeScore,
-    awayScore,
+    homeScore: homeScore ?? 0,
+    awayScore: awayScore ?? 0,
     status,
     statusId,
     action,
     period,
     clock: pickString(o, ["clock", "Clock", "minute", "time"]),
-    ts: pickNumber(o, ["ts", "timestamp", "Timestamp"]) ?? Date.now(),
+    ts: rawTs > 1e12 ? rawTs : rawTs * 1000,
   };
 }
 
