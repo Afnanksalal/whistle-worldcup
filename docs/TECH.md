@@ -41,7 +41,16 @@ Networks: **devnet** `https://txline-dev.txodds.com` (program `6pW64gN1s2uqjHkn1
 
 - **Match result:** home win / draw / away from final scores
 - **Totals:** `home + away > line` → over, else under (default line 2.5)
+- **Live lock:** when a fixture goes `live`, open markets flip to `locked` (no new stakes)
+- **Void / refund:** cancelled or postponed fixtures void open markets; claim returns full stake
 - Shared helpers in `@whistle/shared` keep API and Anchor mappings aligned
+
+## Market lifecycle
+
+```
+open → (kickoff/live) locked → (FT) settled → claim
+open|locked → (cancel/postpone) void → refund claim
+```
 
 ## Demo mode
 

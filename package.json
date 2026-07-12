@@ -12,8 +12,10 @@
     "dev:web": "npm run dev -w @whistle/web",
     "build": "npm run build -w @whistle/shared && npm run build -w @whistle/api && npm run build -w @whistle/web",
     "build:shared": "npm run build -w @whistle/shared",
+    "test": "npm run test -w @whistle/shared",
     "start:api": "npm run start -w @whistle/api",
-    "lint": "npm run lint -w @whistle/web --if-present"
+    "lint": "npm run lint -w @whistle/web --if-present",
+    "check": "npm run build:shared && npm test && npm run build -w @whistle/api"
   },
   "engines": {
     "node": ">=20"

@@ -1,0 +1,74 @@
+name: Deploy Playground
+
+on:
+  push:
+    branches: [master, main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-playground
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Deploy to Playground VPS
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require secrets
+        env:
+          KEY: ${{ secrets.PLAYGROUND_SSH_KEY }}
+        run: |
+          if [ -z "$KEY" ]; then
+            echo "PLAYGROUND_SSH_KEY missing — skip deploy"
+            echo "skip=true" >> "$GITHUB_ENV"
+          else
+            echo "skip=false" >> "$GITHUB_ENV"
+          fi
+
+      - uses: actions/checkout@v4
+        if: env.skip != 'true'
+
+      - name: Start SSH agent
+        if: env.skip != 'true'
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.PLAYGROUND_SSH_KEY }}
+
+      - name: Add host key
+        if: env.skip != 'true'
+        env:
+          HOST: ${{ secrets.PLAYGROUND_HOST }}
+        run: |
+          HOST="${HOST:-ec2-18-61-174-6.ap-south-2.compute.amazonaws.com}"
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+
+      - name: Remote deploy
+        if: env.skip != 'true'
+        env:
+          HOST: ${{ secrets.PLAYGROUND_HOST }}
+          USER: ${{ secrets.PLAYGROUND_USER }}
+        run: |
+          HOST="${HOST:-ec2-18-61-174-6.ap-south-2.compute.amazonaws.com}"
+          USER="${USER:-ubuntu}"
+          ssh -o StrictHostKeyChecking=yes "$USER@$HOST" bash -s <<'EOF'
+          set -euo pipefail
+          REMOTE_DIR=/opt/whistle
+          sudo mkdir -p "$REMOTE_DIR"
+          sudo chown -R ubuntu:ubuntu "$REMOTE_DIR"
+          if [ -d "$REMOTE_DIR/.git" ]; then
+            cd "$REMOTE_DIR"
+            git fetch origin
+            git checkout master || git checkout main
+            git pull --ff-only origin master || git pull --ff-only origin main
+          else
+            git clone https://github.com/Afnanksalal/whistle-worldcup.git "$REMOTE_DIR"
+            cd "$REMOTE_DIR"
+          fi
+          cd infra/playground
+          cp -n .env.example .env || true
+          grep -q '^VPS_PUBLIC_IP=' .env || echo 'VPS_PUBLIC_IP=18.61.174.6' >> .env
+          docker compose up -d --build
+          sleep 8
+          curl -skf "https://127.0.0.1:9444/api/health" || curl -skf "https://18.61.174.6:9444/api/health"
+          EOF

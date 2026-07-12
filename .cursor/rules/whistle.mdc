@@ -1,0 +1,13 @@
+---
+description: Whistle product and architecture conventions for all agent work
+alwaysApply: true
+---
+
+# Whistle conventions
+
+- Ship a **fan prediction product**, not a proof explorer or sportsbook clone.
+- Keep TxLINE as the primary live data source; demo fixtures only when credentials are absent.
+- Put score→outcome math in `@whistle/shared` and reuse it from API/keeper/UI.
+- Parimutuel pools; lock stakes when a match goes live; void+refund on cancel/postpone.
+- Do not commit secrets (`.env`, `wallet.json`, API tokens).
+- Prefer updating `docs/TECH.md` when changing settlement or TxLINE integration.

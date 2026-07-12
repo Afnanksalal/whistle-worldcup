@@ -2,7 +2,8 @@
 
 Tournament-native World Cup prediction pools. Take a side, watch live scores, get paid at full-time — then roll into the next kickoff.
 
-**Repo:** [github.com/Afnanksalal/whistle-worldcup](https://github.com/Afnanksalal/whistle-worldcup)
+**Repo:** [github.com/Afnanksalal/whistle-worldcup](https://github.com/Afnanksalal/whistle-worldcup)  
+**Live:** [https://18.61.174.6:9444](https://18.61.174.6:9444) (Playground VPS)
 
 Powered by [TxLINE](https://txline.txodds.com) sports data on Solana. Built for the [Superteam World Cup — Prediction Markets & Settlement](https://superteam.fun/earn/listing/prediction-markets-and-settlement/) track.
 
@@ -66,8 +67,17 @@ Set `WHISTLE_PROGRAM_ID` and `SOLANA_KEYPAIR_PATH` for the keeper’s optional o
 |---------|-------------|
 | `npm run dev:api` | API + ingest + keeper |
 | `npm run dev:web` | Next.js UI |
+| `npm run check` | Shared build + unit tests + API build |
 | `npm run build` | Build shared, api, web |
 | `npm run activate-txline -w @whistle/api` | TxLINE activation helper |
+
+## Docs & agents
+
+- [AGENTS.md](./AGENTS.md) — operating rules for AI/human contributors
+- [CONTRIBUTING.md](./CONTRIBUTING.md) — branch/PR checklist
+- [docs/TECH.md](./docs/TECH.md) — architecture + TxLINE endpoints
+- Cursor project hooks in `.cursor/hooks.json` + rules in `.cursor/rules/`
+- CI: `.github/workflows/ci.yml` (Node check + `cargo check`)
 
 ## License
 

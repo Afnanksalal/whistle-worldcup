@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "../components/Providers";
 import { Nav } from "../components/Nav";
+import { NotificationToasts } from "../components/NotificationToasts";
 
 export const metadata: Metadata = {
   title: "Whistle — World Cup Predictions",
@@ -21,6 +22,7 @@ export default function RootLayout({
           <div className="pitch-grid" style={{ minHeight: "100vh" }}>
             <Nav />
             {children}
+            <NotificationToasts />
           </div>
         </Providers>
       </body>

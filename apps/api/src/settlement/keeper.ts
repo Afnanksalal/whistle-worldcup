@@ -28,7 +28,9 @@ export async function maybeSettleFixture(
 ) {
   if (!settleEnabled) return;
   const markets = Object.values(getState().markets).filter(
-    (m) => m.fixtureId === fixtureId && m.status === "open"
+    (m) =>
+      m.fixtureId === fixtureId &&
+      (m.status === "open" || m.status === "locked")
   );
   if (!markets.length) return;
 

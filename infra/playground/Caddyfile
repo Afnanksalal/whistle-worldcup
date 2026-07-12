@@ -1,0 +1,28 @@
+{
+	auto_https off
+	default_sni {$VPS_PUBLIC_IP}
+}
+
+https://{$VPS_PUBLIC_IP}:{$WHISTLE_TLS_PORT} {
+	encode zstd gzip
+
+	header {
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+
+	tls /etc/letsencrypt/live/{$VPS_PUBLIC_IP}/fullchain.pem /etc/letsencrypt/live/{$VPS_PUBLIC_IP}/privkey.pem
+
+	handle /api/* {
+		reverse_proxy api:4000
+	}
+
+	handle /ws {
+		reverse_proxy api:4000
+	}
+
+	handle {
+		reverse_proxy web:3000
+	}
+}

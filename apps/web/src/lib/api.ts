@@ -1,8 +1,33 @@
-export const API_URL =
-  process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
+function resolveApiBase(): string {
+  const env = process.env.NEXT_PUBLIC_API_URL;
+  if (env === "" || env === "same-origin") {
+    if (typeof window !== "undefined") return "";
+    return "";
+  }
+  return env || "http://localhost:4000";
+}
+
+export const API_URL = resolveApiBase();
+
+export function apiUrl(path: string): string {
+  const base = resolveApiBase();
+  return `${base}/api${path}`;
+}
+
+export function wsUrl(): string {
+  if (typeof window !== "undefined") {
+    const base = resolveApiBase();
+    if (!base) {
+      const proto = window.location.protocol === "https:" ? "wss:" : "ws:";
+      return `${proto}//${window.location.host}/ws`;
+    }
+    return base.replace(/^http/, "ws") + "/ws";
+  }
+  return "ws://localhost:4000/ws";
+}
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_URL}/api${path}`, {
+  const res = await fetch(apiUrl(path), {
     ...init,
     headers: {
       "Content-Type": "application/json",

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import type { Fixture, MarketPool } from "@whistle/shared";
-import { api, formatKickoff, statusLabel } from "../lib/api";
+import { api, formatKickoff, statusLabel, wsUrl } from "../lib/api";
 
 type FixturesRes = { fixtures: Fixture[] };
 type MarketsRes = { markets: MarketPool[] };
@@ -31,10 +31,9 @@ export function FixtureBoard() {
   useEffect(() => {
     load();
     const t = setInterval(load, 8000);
-    const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
     let ws: WebSocket | null = null;
     try {
-      ws = new WebSocket(API.replace("http", "ws") + "/ws");
+      ws = new WebSocket(wsUrl());
       ws.onmessage = () => load();
     } catch {
       // polling fallback
