@@ -66,6 +66,7 @@ services:
       WHISTLE_TLS_PORT: ${WHISTLE_TLS_PORT:-9444}
     ports:
       - "${WHISTLE_TLS_PORT:-9444}:${WHISTLE_TLS_PORT:-9444}"
+      - "127.0.0.1:8088:8088"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
       - /opt/hana-chat/shared/letsencrypt:/etc/letsencrypt:ro
@@ -76,6 +77,17 @@ services:
       - api
     networks:
       - whistle
+
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate --url http://caddy:8088
+    depends_on:
+      - caddy
+    networks:
+      - whistle
+    profiles:
+      - tunnel
 
 networks:
   whistle:

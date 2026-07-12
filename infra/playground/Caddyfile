@@ -3,17 +3,7 @@
 	default_sni {$VPS_PUBLIC_IP}
 }
 
-https://{$VPS_PUBLIC_IP}:{$WHISTLE_TLS_PORT}, :{$WHISTLE_TLS_PORT} {
-	encode zstd gzip
-
-	header {
-		Referrer-Policy "strict-origin-when-cross-origin"
-		X-Content-Type-Options "nosniff"
-		X-Frame-Options "DENY"
-	}
-
-	tls /etc/letsencrypt/live/{$VPS_PUBLIC_IP}/fullchain.pem /etc/letsencrypt/live/{$VPS_PUBLIC_IP}/privkey.pem
-
+(whistle_proxy) {
 	handle /api/* {
 		reverse_proxy api:4000
 	}
@@ -25,4 +15,22 @@ https://{$VPS_PUBLIC_IP}:{$WHISTLE_TLS_PORT}, :{$WHISTLE_TLS_PORT} {
 	handle {
 		reverse_proxy web:3000
 	}
+}
+
+# Public TLS (needs SG 9444). Cert on this box is currently expired — prefer tunnel.
+https://{$VPS_PUBLIC_IP}:{$WHISTLE_TLS_PORT}, :{$WHISTLE_TLS_PORT} {
+	encode zstd gzip
+	header {
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+	}
+	tls /etc/letsencrypt/live/{$VPS_PUBLIC_IP}/fullchain.pem /etc/letsencrypt/live/{$VPS_PUBLIC_IP}/privkey.pem
+	import whistle_proxy
+}
+
+# Local HTTP for cloudflared quick tunnel (no inbound SG needed)
+:8088 {
+	encode zstd gzip
+	import whistle_proxy
 }
