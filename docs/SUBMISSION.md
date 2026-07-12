@@ -5,8 +5,8 @@
 | Item | URL |
 |------|-----|
 | Public repo | https://github.com/Afnanksalal/whistle-worldcup |
-| Playground (web+api) | https://18.61.174.6:9444 |
-| API health | https://18.61.174.6:9444/api/health |
+| Playground (live) | https://membership-public-gave-racks.trycloudflare.com |
+| API health | https://membership-public-gave-racks.trycloudflare.com/api/health |
 | Local web | http://localhost:3000 |
 | Local API | http://localhost:4000 |
 | Track | https://superteam.fun/earn/listing/prediction-markets-and-settlement/ |

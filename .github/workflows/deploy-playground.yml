@@ -69,6 +69,8 @@ jobs:
           cp -n .env.example .env || true
           grep -q '^VPS_PUBLIC_IP=' .env || echo 'VPS_PUBLIC_IP=18.61.174.6' >> .env
           docker compose up -d --build
+          docker compose --profile tunnel up -d tunnel
           sleep 8
-          curl -skf "https://127.0.0.1:9444/api/health" || curl -skf "https://18.61.174.6:9444/api/health"
+          curl -sf "http://127.0.0.1:8088/api/health"
+          docker logs playground-tunnel-1 2>&1 | grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' | tail -1 || true
           EOF

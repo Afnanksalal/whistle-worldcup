@@ -2,28 +2,38 @@
 
 ## Production (Playground VPS)
 
-Live stack target: **https://18.61.174.6:9444**
-
 | Piece | Detail |
 |-------|--------|
-| Host | XPipe connection **Playground** (`ec2-18-61-174-6.ap-south-2.compute.amazonaws.com`) |
+| Host | XPipe **Playground** (`ec2-18-61-174-6.ap-south-2.compute.amazonaws.com`) |
 | Path | `/opt/whistle` |
 | Compose | [`infra/playground/docker-compose.yml`](../infra/playground/docker-compose.yml) |
-| Edge | Caddy on **:9444** (TLS IP cert from `/opt/hana-chat/shared/letsencrypt`) |
-| Apps | `web` (Next) + `api` (Express) same-origin via `/api` and `/ws` |
+| Public URL | Cloudflare quick tunnel (see live URL in `docker logs playground-tunnel-1`) |
+| Local edge | Caddy `:8088` (HTTP) + `:9444` (TLS IP cert; SG often closed / cert may be expired) |
+| Apps | `web` + `api` same-origin via `/api` and `/ws` |
 
 Does **not** touch hana-chat `:80`/`:443`.
 
-### Manual deploy (XPipe)
+### Current live URL
+
+Quick tunnels rotate when the `tunnel` container restarts. Get the active URL:
 
 ```bash
-# from a machine with XPipe CLI + Playground connection
-xpipe launch Playground -- "sudo mkdir -p /opt/whistle && sudo chown -R ubuntu:ubuntu /opt/whistle"
-xpipe launch Playground -- "git clone https://github.com/Afnanksalal/whistle-worldcup.git /opt/whistle || (cd /opt/whistle && git pull --ff-only)"
-xpipe launch Playground -- "cd /opt/whistle/infra/playground && cp -n .env.example .env && docker compose up -d --build"
+ssh playground 'docker logs playground-tunnel-1 2>&1 | grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" | tail -1'
 ```
 
-Or run [`infra/playground/deploy.sh`](../infra/playground/deploy.sh).
+Example (may be stale): `https://membership-public-gave-racks.trycloudflare.com`
+
+### Start / update stack
+
+```bash
+cd /opt/whistle && git pull --ff-only origin master
+cd infra/playground
+cp -n .env.example .env
+docker compose up -d --build
+docker compose --profile tunnel up -d tunnel
+```
+
+Or from a machine with XPipe: [`infra/playground/deploy.sh`](../infra/playground/deploy.sh) then enable the tunnel profile.
 
 ### CI/CD
 
