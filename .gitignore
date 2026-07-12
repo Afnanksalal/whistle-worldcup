@@ -15,5 +15,9 @@ wallet.json
 *.pem
 .vercel
 apps/api/data/
+data/
+infra/playground/.env
+.agents/
+
 apps/web/out/
 packages/shared/dist/

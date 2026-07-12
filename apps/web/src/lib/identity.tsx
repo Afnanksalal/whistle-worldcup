@@ -1,42 +1,64 @@
 "use client";
 
-import { createContext, useContext, useEffect, useMemo, useState, ReactNode } from "react";
+import {
+  createContext,
+  useCallback,
+  useContext,
+  useMemo,
+  type ReactNode,
+} from "react";
 import { useWallet } from "@solana/wallet-adapter-react";
+import bs58 from "bs58";
+import { api } from "./api";
+import { useRuntime } from "./runtime";
 
 type IdentityCtx = {
-  owner: string;
-  setDemoName: (name: string) => void;
+  owner: string | null;
   isConnected: boolean;
+  ready: boolean;
+  withWalletAuth: () => Promise<Record<string, string>>;
 };
 
 const Ctx = createContext<IdentityCtx>({
-  owner: "guest",
-  setDemoName: () => undefined,
+  owner: null,
   isConnected: false,
+  ready: false,
+  withWalletAuth: async () => ({}),
 });
 
 export function IdentityProvider({ children }: { children: ReactNode }) {
   const wallet = useWallet();
-  const [demo, setDemo] = useState("fan-" + Math.random().toString(36).slice(2, 6));
+  const { meta } = useRuntime();
 
-  useEffect(() => {
-    const saved = localStorage.getItem("whistle_demo_owner");
-    if (saved) setDemo(saved);
-  }, []);
+  const owner = wallet.publicKey?.toBase58() || null;
 
-  const setDemoName = (name: string) => {
-    const v = name.trim() || demo;
-    setDemo(v);
-    localStorage.setItem("whistle_demo_owner", v);
-  };
+  const withWalletAuth = useCallback(async (): Promise<Record<string, string>> => {
+    if (!meta.requireWalletAuth) return {};
+    if (!wallet.publicKey || !wallet.signMessage) {
+      throw new Error("Connect a wallet that supports message signing");
+    }
+    const walletAddr = wallet.publicKey.toBase58();
+    const challenge = await api<{ nonce: string; message: string }>("/auth/challenge", {
+      method: "POST",
+      body: JSON.stringify({ wallet: walletAddr }),
+    });
+    const encoded = new TextEncoder().encode(challenge.message);
+    const sig = await wallet.signMessage(encoded);
+    return {
+      "x-wallet": walletAddr,
+      "x-wallet-nonce": challenge.nonce,
+      "x-wallet-signature": bs58.encode(sig),
+    };
+  }, [meta.requireWalletAuth, wallet.publicKey, wallet.signMessage]);
 
   const value = useMemo(
     () => ({
-      owner: wallet.publicKey?.toBase58() || demo,
-      setDemoName,
+      owner,
       isConnected: !!wallet.publicKey,
+      ready: !!wallet.publicKey,
+      withWalletAuth,
     }),
-    [wallet.publicKey, demo]
+    [owner, wallet.publicKey, withWalletAuth]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

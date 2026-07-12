@@ -3,71 +3,114 @@ import path from "path";
 import http from "http";
 import express from "express";
 import cors from "cors";
+import helmet from "helmet";
+import rateLimit from "express-rate-limit";
+import pinoHttp from "pino-http";
 import { WebSocketServer } from "ws";
-import { router } from "./routes";
+import { createRouter, requestContext } from "./routes";
 import { subscribe } from "./store";
-import { bootstrapFixtures, startDemoMatchSimulator, startSseIngest } from "./txline/ingest";
+import {
+  bootstrapFixtures,
+  getFixtureSource,
+  refreshFixtures,
+  startSseIngest,
+} from "./txline/ingest";
 import { networkConfig, refreshGuestJwt } from "./txline/client";
 import { configureKeeper, startKeeperLoop } from "./settlement/keeper";
 import { ensureMarket } from "./markets/service";
 import { getState } from "./store";
+import { loadConfig, publicMeta } from "./config";
+import { configureLogger, getLogger } from "./observability";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../../../.env") });
 
 async function main() {
-  const port = Number(process.env.PORT || 4000);
-  const demoMode = process.env.DEMO_MODE === "true" || !process.env.TXLINE_API_TOKEN;
-  const network = process.env.TXLINE_NETWORK || "devnet";
-  const net = networkConfig(network);
-  const apiOrigin = process.env.TXLINE_API_ORIGIN || net.apiOrigin;
+  const cfg = loadConfig();
+  configureLogger(cfg.logLevel);
+  const log = getLogger();
 
-  let guestJwt = process.env.TXLINE_GUEST_JWT || "";
-  const apiToken = process.env.TXLINE_API_TOKEN || "";
+  const net = networkConfig(cfg.network);
+  const apiOrigin = cfg.apiOrigin || net.apiOrigin;
+  const placeholder = cfg.apiToken.startsWith("txl_");
 
-  if (apiToken && !guestJwt) {
+  let guestJwt = cfg.guestJwt;
+  if (!guestJwt && !placeholder) {
     try {
       guestJwt = await refreshGuestJwt(apiOrigin);
-      console.log("[txline] refreshed guest JWT");
-    } catch (e) {
-      console.warn("[txline] guest JWT refresh failed", e);
+      log.info("refreshed guest JWT");
+    } catch (err) {
+      log.warn({ err }, "guest JWT refresh failed");
     }
   }
 
   const txlineCfg =
-    apiToken && guestJwt
-      ? { apiOrigin, guestJwt, apiToken }
-      : null;
+    cfg.apiToken && guestJwt
+      ? { apiOrigin, guestJwt, apiToken: cfg.apiToken }
+      : cfg.apiToken
+        ? { apiOrigin, guestJwt: guestJwt || "pending", apiToken: cfg.apiToken }
+        : null;
 
-  configureKeeper(txlineCfg, process.env.KEEP_SETTLE_ENABLED !== "false");
+  configureKeeper(placeholder ? null : txlineCfg, cfg.keepSettleEnabled);
 
-  await bootstrapFixtures(txlineCfg, demoMode);
+  await bootstrapFixtures(txlineCfg);
 
-  // Auto-create public match_result markets for upcoming/live fixtures
   for (const f of Object.values(getState().fixtures)) {
-    if (f.status === "cancelled") continue;
+    if (f.status === "cancelled" || f.status === "postponed") continue;
     ensureMarket({ fixtureId: f.id, marketType: "match_result" });
     ensureMarket({ fixtureId: f.id, marketType: "total_goals", line: 2.5 });
   }
 
-  if (txlineCfg) {
-    startSseIngest(txlineCfg);
-  } else {
-    console.log("[txline] no API token — demo mode ingest");
-    startDemoMatchSimulator();
+  if (getFixtureSource() === "txline" && txlineCfg && guestJwt) {
+    startSseIngest({ ...txlineCfg, guestJwt });
   }
+
+  setInterval(() => {
+    void refreshFixtures(txlineCfg)
+      .then(() => {
+        for (const f of Object.values(getState().fixtures)) {
+          if (f.status === "cancelled" || f.status === "postponed") continue;
+          ensureMarket({ fixtureId: f.id, marketType: "match_result" });
+          ensureMarket({ fixtureId: f.id, marketType: "total_goals", line: 2.5 });
+        }
+      })
+      .catch((e) => log.warn({ err: e }, "fixture refresh failed"));
+  }, 60_000);
 
   startKeeperLoop(15_000);
 
   const app = express();
+  app.disable("x-powered-by");
   app.use(
-    cors({
-      origin: process.env.API_CORS_ORIGIN?.split(",") || true,
+    helmet({
+      contentSecurityPolicy: false,
+      crossOriginEmbedderPolicy: false,
     })
   );
-  app.use(express.json());
-  app.use("/api", router);
+  app.use(cors({ origin: cfg.corsOrigins, credentials: true }));
+  app.use(express.json({ limit: "256kb" }));
+  app.use(requestContext);
+  app.use(
+    pinoHttp({
+      logger: log,
+      autoLogging: {
+        ignore: (req) => req.url === "/api/live" || req.url === "/api/metrics",
+      },
+      customProps: (req) => ({ requestId: (req as express.Request).requestId }),
+    })
+  );
+  app.use(
+    "/api",
+    rateLimit({
+      windowMs: 60_000,
+      max: cfg.rateLimitPerMin,
+      standardHeaders: true,
+      legacyHeaders: false,
+      message: { error: "rate limit exceeded" },
+    })
+  );
+  app.use("/api", createRouter(cfg));
 
   const server = http.createServer(app);
   const wss = new WebSocketServer({ server, path: "/ws" });
@@ -77,6 +120,7 @@ async function main() {
       JSON.stringify({
         event: "hello",
         payload: {
+          ...publicMeta(cfg, getFixtureSource()),
           fixtures: Object.keys(getState().fixtures).length,
         },
       })
@@ -90,10 +134,14 @@ async function main() {
     }
   });
 
-  server.listen(port, () => {
-    console.log(`Whistle API on http://localhost:${port}`);
-    console.log(`  demoMode=${demoMode} network=${network}`);
-    console.log(`  data dir ready under ${path.join(process.cwd(), "data")}`);
+  server.listen(cfg.port, () => {
+    log.info(
+      {
+        port: cfg.port,
+        meta: publicMeta(cfg, getFixtureSource()),
+      },
+      `Whistle API listening on :${cfg.port}`
+    );
   });
 }
 

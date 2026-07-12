@@ -5,9 +5,9 @@ import { Nav } from "../components/Nav";
 import { NotificationToasts } from "../components/NotificationToasts";
 
 export const metadata: Metadata = {
-  title: "Whistle — World Cup Predictions",
+  title: "Whistle — World Cup prediction markets",
   description:
-    "Take a side. Watch live. Get paid at the whistle. Tournament prediction pools powered by TxLINE.",
+    "Parimutuel World Cup pools with live match data, full-time settlement, and private squads.",
 };
 
 export default function RootLayout({

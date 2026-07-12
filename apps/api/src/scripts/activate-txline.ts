@@ -62,7 +62,7 @@ Next steps (from TxLINE World Cup free tier docs):
 4. POST ${apiOrigin}/api/token/activate
 5. Put the returned token in TXLINE_API_TOKEN
 
-Until then the API runs in DEMO_MODE with simulated World Cup fixtures.
+Until then the API will not boot — set TXLINE_API_TOKEN after activation.
 `);
   console.log("Guest JWT (temporary):", jwt.slice(0, 24) + "…");
 }

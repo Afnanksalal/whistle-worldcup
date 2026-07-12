@@ -1,88 +1,70 @@
-# Deployment
+# Whistle — production VPS only (no Vercel, no demo mode)
 
-## Production (Playground VPS)
+## Stack
 
 | Piece | Detail |
 |-------|--------|
-| Host | XPipe **Playground** (`ec2-18-61-174-6.ap-south-2.compute.amazonaws.com`) |
+| Host | XPipe **Playground** EC2 (`ec2-18-61-174-6.ap-south-2.compute.amazonaws.com`) |
 | Path | `/opt/whistle` |
 | Compose | [`infra/playground/docker-compose.yml`](../infra/playground/docker-compose.yml) |
-| Public URL | Cloudflare quick tunnel (see live URL in `docker logs playground-tunnel-1`) |
-| Local edge | Caddy `:8088` (HTTP) + `:9444` (TLS IP cert; SG often closed / cert may be expired) |
-| Apps | `web` + `api` same-origin via `/api` and `/ws` |
+| Edge | Caddy same-origin `/api` + `/ws` + Next.js |
+| Public | Cloudflare tunnel (or TLS `:9444` when SG/cert ready) |
 
-Does **not** touch hana-chat `:80`/`:443`.
-
-### Current live URL
-
-Quick tunnels rotate when the `tunnel` container restarts. Get the active URL:
+## Required secrets (VPS `.env`)
 
 ```bash
-ssh playground 'docker logs playground-tunnel-1 2>&1 | grep -oE "https://[a-z0-9-]+\.trycloudflare\.com" | tail -1'
+TXLINE_API_TOKEN=...          # mandatory — API will not boot without it
+ADMIN_API_KEY=...             # ≥16 chars — settle/void/admin console
+API_CORS_ORIGIN=same-origin   # behind Caddy; or explicit https://your.host
+NEWS_API_KEY=...              # optional; RSS fallback if unset
+WHISTLE_PROGRAM_ID=...        # optional until Anchor deploy
+REQUIRE_WALLET_AUTH=true
 ```
 
-Example (may be stale): `https://membership-public-gave-racks.trycloudflare.com`
+`DEMO_MODE` / `ALLOW_SANDBOX` are **removed**. Setting them crashes boot.
 
-### Start / update stack
+## Deploy
 
 ```bash
-cd /opt/whistle && git pull --ff-only origin master
+cd /opt/whistle && git fetch origin && git reset --hard origin/master
 cd infra/playground
-cp -n .env.example .env
+# edit .env — must include TXLINE_API_TOKEN + ADMIN_API_KEY
 docker compose up -d --build
 docker compose --profile tunnel up -d tunnel
+curl -sf http://127.0.0.1:8088/api/health
+docker logs playground-tunnel-1 2>&1 | grep -oE 'https://[a-z0-9-]+\.trycloudflare\.com' | tail -1
 ```
 
-Or from a machine with XPipe: [`infra/playground/deploy.sh`](../infra/playground/deploy.sh) then enable the tunnel profile.
+## Observability
 
-### CI/CD
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/live` | Liveness |
+| `GET /api/ready` | Readiness (fixtures loaded) |
+| `GET /api/health` | JSON health + counters |
+| `GET /api/metrics` | Prometheus text |
 
-| Workflow | Trigger | Action |
-|----------|---------|--------|
-| `.github/workflows/ci.yml` | PR / push | `npm run check` + web build + `cargo check` |
-| `.github/workflows/deploy-playground.yml` | push `master` / manual | SSH → `git pull` → `docker compose up -d --build` |
+Structured JSON logs via pino. Request IDs on `x-request-id`.
 
-Required GitHub secrets:
+## Admin
 
-- `PLAYGROUND_SSH_KEY` — private key authorized on the VPS
-- `PLAYGROUND_HOST` — EC2 hostname
-- `PLAYGROUND_USER` — `ubuntu`
+Open `/admin` on the site, paste `ADMIN_API_KEY` (stored in browser localStorage only).
 
-### AWS note
+## CI/CD
 
-Security group must allow **inbound TCP 9444** from the internet (or your testers).
+| Workflow | Action |
+|----------|--------|
+| `ci.yml` | check + build |
+| `deploy-playground.yml` | SSH → pull → compose rebuild |
 
-## Vercel (optional frontend)
+Secrets: `PLAYGROUND_SSH_KEY`, `PLAYGROUND_HOST`, `PLAYGROUND_USER`.
 
-Vercel CLI must be authenticated (`npx vercel login`). Then:
-
-```bash
-cd apps/web
-npx vercel --prod \
-  -e NEXT_PUBLIC_API_URL=https://18.61.174.6:9444 \
-  -e NEXT_PUBLIC_SOLANA_RPC=https://api.devnet.solana.com
-```
-
-Prefer playground same-origin deploy unless you need a `*.vercel.app` URL for Superteam.
-
-## Local (demo)
+## Local (still live-only)
 
 ```bash
+cp .env.example .env   # set TXLINE_API_TOKEN + ADMIN_API_KEY
 npm install
 npm run build -w @whistle/shared
-npm run dev:api   # :4000
-npm run dev:web   # :3000
+npm run dev:api
+npm run dev:web
 ```
-
-## Solana program (devnet)
-
-```bash
-anchor build
-anchor deploy --provider.cluster devnet
-```
-
-Set `WHISTLE_PROGRAM_ID` on the API when the program is live.
-
-## Superteam checklist
-
-See [SUBMISSION.md](./SUBMISSION.md) and [TASKS.md](./TASKS.md).

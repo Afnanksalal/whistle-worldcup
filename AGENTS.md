@@ -31,7 +31,9 @@ npm run dev:web        # :3000
 cargo check -p whistle # on-chain program
 ```
 
-Demo mode runs automatically when `TXLINE_API_TOKEN` is unset.
+Demo mode does **not** exist. Boot requires `TXLINE_API_TOKEN` + `ADMIN_API_KEY`.
+Placeholder `txl_…` tokens load the free TheSportsDB schedule so the product stays alive
+until a real TxLINE token is configured.
 
 ## Agent workflow preferences
 
