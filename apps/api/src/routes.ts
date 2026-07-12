@@ -26,6 +26,9 @@ import { buildGroupTables, listRounds } from "./groups";
 import { getWorldCupNews } from "./news";
 import { bumpMetric, getMetrics, metricsPrometheus } from "./observability";
 import { getFixtureSource } from "./txline/ingest";
+import { priceHistoryForFixture } from "./markets/prices";
+import { getMatchStats, refreshMatchStats } from "./match/stats";
+import { buildInsights, getInsights } from "./insights";
 
 declare global {
   namespace Express {
@@ -102,14 +105,56 @@ export function createRouter(cfg: AppConfig) {
     res.json({ fixtures, meta: publicMeta(cfg, getFixtureSource()) });
   });
 
-  router.get("/fixtures/:id", (req, res) => {
+  router.get("/fixtures/:id", async (req, res) => {
     const fixture = getState().fixtures[req.params.id];
     if (!fixture) return res.status(404).json({ error: "fixture not found" });
     const live = getState().live[fixture.id];
     const odds = getState().odds[fixture.id] || [];
     const squadId = typeof req.query.squadId === "string" ? req.query.squadId : undefined;
     const markets = listMarkets(fixture.id, squadId);
-    res.json({ fixture, live, odds, markets, meta: publicMeta(cfg, getFixtureSource()) });
+
+    // Refresh stats/insights in the background if stale (>45s)
+    const statsAge = getMatchStats(fixture.id)?.updatedAt || 0;
+    if (Date.now() - statsAge > 45_000) {
+      void refreshMatchStats(fixture.id)
+        .then(() => buildInsights(fixture.id))
+        .catch(() => undefined);
+    }
+
+    res.json({
+      fixture,
+      live,
+      odds,
+      markets,
+      priceHistory: priceHistoryForFixture(fixture.id),
+      stats: getMatchStats(fixture.id),
+      insights: getInsights(fixture.id),
+      meta: publicMeta(cfg, getFixtureSource()),
+    });
+  });
+
+  router.get("/fixtures/:id/insights", async (req, res) => {
+    try {
+      const cards = await buildInsights(req.params.id);
+      res.json({ insights: cards });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  router.get("/fixtures/:id/stats", async (req, res) => {
+    try {
+      const stats =
+        (await refreshMatchStats(req.params.id)) || getMatchStats(req.params.id);
+      res.json({ stats });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  router.get("/markets/:id/history", (req, res) => {
+    const hist = getState().priceHistory[req.params.id] || [];
+    res.json({ history: hist });
   });
 
   router.get("/groups", (_req, res) => {
@@ -300,7 +345,11 @@ export function createRouter(cfg: AppConfig) {
   });
 
   router.get("/notifications", (_req, res) => {
-    res.json({ notifications: getState().notifications.slice(0, 30) });
+    // Settlement spam never surfaces here
+    const notes = getState().notifications.filter(
+      (n) => !n.type.includes("settle") && n.type !== "void"
+    );
+    res.json({ notifications: notes.slice(0, 30) });
   });
 
   router.post("/squads", walletOwner, (req, res) => {

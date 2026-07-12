@@ -12,7 +12,8 @@ import {
   resolveMatchResult,
   resolveTotals,
 } from "@whistle/shared";
-import { getState, mutate, pushNotification } from "../store";
+import { getState, mutate } from "../store";
+import { recordMarketPrice } from "./prices";
 
 function defaultOutcomes(marketType: MarketType): Record<string, number> {
   if (marketType === "match_result") return { home: 0, draw: 0, away: 0 };
@@ -56,6 +57,7 @@ export function ensureMarket(
   mutate((s) => {
     s.markets[market.id] = market;
   }, "market", market);
+  recordMarketPrice(market.id);
   return market;
 }
 
@@ -83,6 +85,8 @@ export function deposit(req: DepositRequest): { market: MarketPool; position: Po
     m.totalPool += req.amount;
     s.positions[position.id] = position;
   }, "deposit", { marketId: market.id, position });
+
+  recordMarketPrice(req.marketId);
 
   return { market: getState().markets[req.marketId], position };
 }
@@ -121,12 +125,6 @@ export function settleMarketOffchain(
     m.settleTxSig = settleTxSig;
   }, "settled", { marketId, winning });
 
-  pushNotification(
-    "settled",
-    `Market settled — ${winning.toUpperCase()} wins (pool $${market.totalPool.toFixed(2)})`,
-    marketId
-  );
-
   return getState().markets[marketId];
 }
 
@@ -141,7 +139,6 @@ export function voidMarket(marketId: string, reason = "match abandoned") {
     m.settledAt = Date.now();
   }, "void", { marketId, reason });
 
-  pushNotification("void", `Market voided — ${reason}. Stakes refundable.`, marketId);
   return getState().markets[marketId];
 }
 

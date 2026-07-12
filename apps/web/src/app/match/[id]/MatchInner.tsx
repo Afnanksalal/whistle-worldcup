@@ -2,17 +2,31 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
-import type { Fixture, LiveScoreUpdate, MarketPool, OddsQuote } from "@whistle/shared";
+import type {
+  Fixture,
+  InsightCard,
+  LiveScoreUpdate,
+  MarketPool,
+  MatchStats,
+  OddsQuote,
+  PricePoint,
+} from "@whistle/shared";
 import { impliedShares } from "@whistle/shared";
 import { api, formatKickoff, statusLabel } from "../../../lib/api";
 import { useIdentity } from "../../../lib/identity";
 import { useRuntime } from "../../../lib/runtime";
+import { PredictionChart } from "../../../components/PredictionChart";
+import { MatchStatsPanel } from "../../../components/MatchStatsPanel";
+import { InsightsPanel } from "../../../components/InsightsPanel";
 
 type Detail = {
   fixture: Fixture;
   live?: LiveScoreUpdate;
   odds: OddsQuote[];
   markets: MarketPool[];
+  priceHistory?: Record<string, PricePoint[]>;
+  stats?: MatchStats | null;
+  insights?: InsightCard[];
 };
 
 const OUTCOME_LABELS: Record<string, string> = {
@@ -52,7 +66,7 @@ export default function MatchPageInner() {
 
   useEffect(() => {
     void load();
-    const t = setInterval(() => void load(), 5000);
+    const t = setInterval(() => void load(), 4000);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id, squadId]);
@@ -63,6 +77,22 @@ export default function MatchPageInner() {
   );
 
   const implied = market ? impliedShares(market.outcomes) : {};
+
+  const chartLabels = useMemo(() => {
+    if (!data || !market) return {};
+    const labels: Record<string, string> = {};
+    for (const k of Object.keys(market.outcomes)) {
+      labels[k] =
+        k === "home"
+          ? data.fixture.home.name
+          : k === "away"
+            ? data.fixture.away.name
+            : OUTCOME_LABELS[k] || k;
+    }
+    return labels;
+  }, [data, market]);
+
+  const history = market ? data?.priceHistory?.[market.id] || [] : [];
 
   const stake = async () => {
     if (!market || !selectedOutcome || !owner) return;
@@ -119,6 +149,7 @@ export default function MatchPageInner() {
           SQUAD MARKET
         </p>
       )}
+
       <div className="rise panel" style={{ padding: "1.6rem 1.4rem", marginBottom: "1rem" }}>
         <div
           style={{
@@ -158,21 +189,26 @@ export default function MatchPageInner() {
             {fixture.away.name}
           </div>
         </div>
+      </div>
 
-        {fixture.status === "finished" && (
-          <p
-            className="mono"
-            style={{
-              textAlign: "center",
-              color: "var(--cyan)",
-              marginTop: "1.1rem",
-              fontSize: "0.75rem",
-              letterSpacing: "0.08em",
-            }}
-          >
-            FULL TIME · POOLS SETTLING
-          </p>
-        )}
+      <div style={{ marginBottom: "1rem" }}>
+        <PredictionChart history={history} labels={chartLabels} />
+      </div>
+
+      <div
+        style={{
+          display: "grid",
+          gap: "1rem",
+          gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+          marginBottom: "1rem",
+        }}
+      >
+        <MatchStatsPanel
+          stats={data.stats || null}
+          homeName={fixture.home.shortName || fixture.home.name}
+          awayName={fixture.away.shortName || fixture.away.name}
+        />
+        <InsightsPanel insights={data.insights || []} />
       </div>
 
       <div
@@ -202,10 +238,6 @@ export default function MatchPageInner() {
               </button>
             ))}
           </div>
-
-          {!data.markets.length && (
-            <p style={{ color: "var(--mute)" }}>No open markets for this fixture yet.</p>
-          )}
 
           {market && (
             <>
@@ -270,32 +302,12 @@ export default function MatchPageInner() {
 
               {meta.settlementRail === "ledger" && (
                 <p style={{ marginTop: "0.75rem", color: "var(--mute)", fontSize: "0.8rem" }}>
-                  Settlement rail: ledger (on-chain escrow activates when the program is deployed).
+                  Settlement rail: ledger until on-chain program ID is set.
                 </p>
               )}
-
               {msg && (
                 <p style={{ marginTop: "0.75rem", color: "var(--mute)", fontSize: "0.88rem" }}>
                   {msg}
-                </p>
-              )}
-              {market.status === "locked" && (
-                <p style={{ marginTop: "0.75rem", color: "var(--mute)", fontSize: "0.88rem" }}>
-                  Kickoff — stakes locked. Payouts unlock at full-time.
-                </p>
-              )}
-              {market.status === "void" && (
-                <p style={{ marginTop: "0.75rem", color: "var(--signal)", fontWeight: 600 }}>
-                  Market voided — claim a full refund from Positions.
-                </p>
-              )}
-              {market.status === "settled" && market.winningOutcome && (
-                <p
-                  className="mono"
-                  style={{ marginTop: "0.75rem", color: "var(--cyan)", fontSize: "0.8rem" }}
-                >
-                  SETTLED · {OUTCOME_LABELS[market.winningOutcome].toUpperCase()}
-                  {market.settleTxSig ? ` · ${market.settleTxSig.slice(0, 14)}…` : ""}
                 </p>
               )}
             </>
@@ -307,10 +319,11 @@ export default function MatchPageInner() {
             Reference odds
           </h2>
           <p style={{ color: "var(--mute)", fontSize: "0.88rem", marginTop: 0 }}>
-            Consensus line from the live feed. Pool price is stake-weighted — not the house line.
+            External consensus when TxLINE odds SSE is connected. Pool graph above is the tradable
+            price.
           </p>
           {data.odds.length === 0 ? (
-            <p style={{ color: "var(--mute)" }}>Waiting for odds quotes on this fixture.</p>
+            <p style={{ color: "var(--mute)" }}>No external quotes on this fixture yet.</p>
           ) : (
             <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.2rem" }}>
               {data.odds.slice(0, 12).map((o, i) => (

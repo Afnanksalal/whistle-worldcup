@@ -14,19 +14,14 @@ export default function PositionsPage() {
   const { owner, ready, withWalletAuth } = useIdentity();
   const { stakeLabel } = useRuntime();
   const [positions, setPositions] = useState<PosRow[]>([]);
-  const [notifications, setNotifications] = useState<
-    Array<{ id: string; message: string; ts: number; type: string }>
-  >([]);
   const [msg, setMsg] = useState<string | null>(null);
 
   const load = async () => {
     if (!owner) return;
-    const [p, n] = await Promise.all([
-      api<{ positions: PosRow[] }>(`/positions?owner=${encodeURIComponent(owner)}`),
-      api<{ notifications: typeof notifications }>("/notifications"),
-    ]);
+    const p = await api<{ positions: PosRow[] }>(
+      `/positions?owner=${encodeURIComponent(owner)}`
+    );
     setPositions(p.positions);
-    setNotifications(n.notifications);
   };
 
   useEffect(() => {
@@ -154,23 +149,11 @@ export default function PositionsPage() {
       </div>
 
       <h2 className="display" style={{ fontSize: "1.25rem" }}>
-        Settlements
+        Activity
       </h2>
-      <div style={{ display: "grid", gap: "0.45rem" }}>
-        {notifications.map((n) => (
-          <div
-            key={n.id}
-            className="panel"
-            style={{ padding: "0.8rem 1rem", color: "var(--mute)", fontSize: "0.88rem" }}
-          >
-            <strong className="mono" style={{ color: "var(--cyan)", fontSize: "0.7rem" }}>
-              {n.type.toUpperCase()}
-            </strong>{" "}
-            — {n.message}
-          </div>
-        ))}
-        {!notifications.length && <p style={{ color: "var(--mute)" }}>No settlement events yet.</p>}
-      </div>
+      <p style={{ color: "var(--mute)", fontSize: "0.88rem" }}>
+        Settlement spam removed. Track claims and market status on each position above.
+      </p>
     </main>
   );
 }

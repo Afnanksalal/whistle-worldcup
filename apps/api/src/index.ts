@@ -21,6 +21,9 @@ import { ensureMarket } from "./markets/service";
 import { getState } from "./store";
 import { loadConfig, publicMeta } from "./config";
 import { configureLogger, getLogger } from "./observability";
+import { snapshotAllOpenMarkets, recordMarketPrice } from "./markets/prices";
+import { refreshLiveFixtureStats } from "./match/stats";
+import { buildInsights } from "./insights";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
@@ -62,6 +65,11 @@ async function main() {
     ensureMarket({ fixtureId: f.id, marketType: "total_goals", line: 2.5 });
   }
 
+  // Seed price history so graphs are never empty on first paint
+  for (const m of Object.values(getState().markets)) {
+    recordMarketPrice(m.id);
+  }
+
   if (getFixtureSource() === "txline" && txlineCfg && guestJwt) {
     startSseIngest({ ...txlineCfg, guestJwt });
   }
@@ -77,6 +85,29 @@ async function main() {
       })
       .catch((e) => log.warn({ err: e }, "fixture refresh failed"));
   }, 60_000);
+
+  setInterval(() => snapshotAllOpenMarkets(), 20_000);
+  setInterval(() => {
+    void refreshLiveFixtureStats().catch((e) => log.warn({ err: e }, "stats refresh failed"));
+  }, 45_000);
+  setInterval(() => {
+    const liveIds = Object.values(getState().fixtures)
+      .filter((f) => f.status === "live" || f.status === "scheduled")
+      .slice(0, 10)
+      .map((f) => f.id);
+    for (const id of liveIds) {
+      void buildInsights(id).catch(() => undefined);
+    }
+  }, 90_000);
+
+  // Warm stats + insights for first board page
+  void refreshLiveFixtureStats()
+    .then(async () => {
+      for (const f of Object.values(getState().fixtures).slice(0, 12)) {
+        await buildInsights(f.id).catch(() => undefined);
+      }
+    })
+    .catch(() => undefined);
 
   startKeeperLoop(15_000);
 

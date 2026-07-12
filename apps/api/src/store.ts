@@ -2,10 +2,13 @@ import fs from "fs";
 import path from "path";
 import {
   Fixture,
+  InsightCard,
   LiveScoreUpdate,
   MarketPool,
+  MatchStats,
   OddsQuote,
   Position,
+  PricePoint,
   Squad,
 } from "@whistle/shared";
 
@@ -16,6 +19,12 @@ export interface AppState {
   markets: Record<string, MarketPool>;
   positions: Record<string, Position>;
   squads: Record<string, Squad>;
+  /** Pool implied-price time series keyed by marketId */
+  priceHistory: Record<string, PricePoint[]>;
+  /** Live match stats keyed by fixtureId */
+  matchStats: Record<string, MatchStats>;
+  /** Cached insights keyed by fixtureId */
+  insights: Record<string, InsightCard[]>;
   notifications: Array<{
     id: string;
     type: string;
@@ -36,6 +45,9 @@ function emptyState(): AppState {
     markets: {},
     positions: {},
     squads: {},
+    priceHistory: {},
+    matchStats: {},
+    insights: {},
     notifications: [],
   };
 }
@@ -76,7 +88,16 @@ export function subscribe(listener: (event: string, payload: unknown) => void): 
   return () => listeners.delete(listener);
 }
 
+/** Ops log only — never used for user-facing toasts. */
 export function pushNotification(type: string, message: string, marketId?: string) {
+  if (
+    type === "settle" ||
+    type === "settled" ||
+    type === "void" ||
+    type.includes("settle")
+  ) {
+    return; // silenced — settlement spam removed
+  }
   mutate((s) => {
     s.notifications.unshift({
       id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -85,6 +106,6 @@ export function pushNotification(type: string, message: string, marketId?: strin
       marketId,
       ts: Date.now(),
     });
-    s.notifications = s.notifications.slice(0, 100);
+    s.notifications = s.notifications.slice(0, 50);
   }, "notification", { type, message, marketId });
 }
