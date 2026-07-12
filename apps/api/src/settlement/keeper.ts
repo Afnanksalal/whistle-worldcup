@@ -12,6 +12,7 @@ import {
   normalizeScoreUpdate,
 } from "../txline/client";
 import { submitOnchainSettle } from "./onchain";
+import { getLogger, markSettle } from "../observability";
 
 let txlineCfg: TxlineConfig | null = null;
 let settleEnabled = true;
@@ -27,6 +28,7 @@ export async function maybeSettleFixture(
   awayScore: number
 ) {
   if (!settleEnabled) return;
+  const log = getLogger().child({ module: "keeper" });
   const markets = Object.values(getState().markets).filter(
     (m) =>
       m.fixtureId === fixtureId &&
@@ -37,7 +39,7 @@ export async function maybeSettleFixture(
   let settleTxSig: string | undefined;
   let mode: "onchain" | "offchain" = "offchain";
 
-  if (txlineCfg?.apiToken && !fixtureId.startsWith("demo-")) {
+  if (txlineCfg?.apiToken) {
     try {
       const historical = await fetchHistoricalScores(txlineCfg, fixtureId);
       const finalRec = historical
@@ -76,21 +78,19 @@ export async function maybeSettleFixture(
         mode = "onchain";
       }
     } catch (err) {
-      console.warn("[keeper] on-chain settle path failed, using offchain:", err);
+      log.warn({ err, fixtureId }, "on-chain settle path failed, using offchain");
     }
   }
 
   for (const market of markets) {
-    // Validate deterministic mapping matches expected outcome before writing
     if (market.marketType === "match_result") {
       resolveMatchResult(homeScore, awayScore);
     } else {
       resolveTotals(homeScore, awayScore, market.line ?? 2.5);
     }
     settleMarketOffchain(market.id, homeScore, awayScore, settleTxSig);
-    console.log(
-      `[keeper] settled market ${market.id} for ${fixtureId} via ${mode}`
-    );
+    markSettle();
+    log.info({ marketId: market.id, fixtureId, mode }, "settled market");
   }
 }
 
@@ -109,7 +109,6 @@ export async function runKeeperPass() {
     }
   }
 
-  // Also settle finished fixtures that have open markets
   for (const f of Object.values(state.fixtures)) {
     if (f.status === "finished" && f.score) {
       await maybeSettleFixture(f.id, f.score.home, f.score.away);
@@ -119,7 +118,9 @@ export async function runKeeperPass() {
 
 export function startKeeperLoop(intervalMs = 20_000) {
   const tick = () => {
-    void runKeeperPass().catch((e) => console.warn("[keeper] pass error", e));
+    void runKeeperPass().catch((e) =>
+      getLogger().warn({ err: e }, "keeper pass error")
+    );
   };
   tick();
   return setInterval(tick, intervalMs);

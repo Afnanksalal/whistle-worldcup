@@ -3,63 +3,62 @@
 Tournament-native World Cup prediction pools. Take a side, watch live scores, get paid at full-time — then roll into the next kickoff.
 
 **Repo:** [github.com/Afnanksalal/whistle-worldcup](https://github.com/Afnanksalal/whistle-worldcup)  
-**Live:** [https://membership-public-gave-racks.trycloudflare.com](https://membership-public-gave-racks.trycloudflare.com) (Playground VPS + Cloudflare tunnel)
+**Deploy:** Playground VPS + Docker + Caddy (+ Cloudflare tunnel). No Vercel.
 
-Powered by [TxLINE](https://txline.txodds.com) sports data on Solana. Built for the [Superteam World Cup — Prediction Markets & Settlement](https://superteam.fun/earn/listing/prediction-markets-and-settlement/) track.
+Powered by [TxLINE](https://txline.txodds.com) sports data on Solana (with free [TheSportsDB](https://www.thesportsdb.com) schedule fallback). Built for the [Superteam World Cup — Prediction Markets & Settlement](https://superteam.fun/earn/listing/prediction-markets-and-settlement/) track.
 
 ## Product
 
-- **Fixtures board** — World Cup / friendlies schedule with live status
-- **Parimutuel pools** — Match result (1X2) and totals (O/U 2.5); pool composition sets price
-- **Live match page** — Scores + reference odds from TxLINE feeds
-- **Instant settlement** — Keeper settles open markets when a match reaches full-time
-- **Squads** — Private rooms with invite codes and leaderboards
-- **Positions & claims** — Track stakes and claim winnings after settle
+- **Markets board** — live schedule with pool sizes
+- **Group stage** — standings derived from finished fixtures (`/groups`)
+- **News** — keyless RSS (BBC / ESPN / Guardian) at `/news`
+- **Parimutuel pools** — 1X2 + O/U 2.5; pool composition sets price
+- **Match desk** — scores, stake UI, reference odds when TxLINE SSE is live
+- **Squads** — private books, invite codes, leaderboards
+- **Positions & claims** — stake book + FT / void refunds
+- **Admin** — `/admin` ops console (lock / void / settle) behind `ADMIN_API_KEY`
 
 ## Monorepo
 
 ```
-apps/web          Next.js product UI
-apps/api          TxLINE ingest, markets API, keeper, WebSocket fanout
+apps/web          Next.js product UI (VPS only)
+apps/api          Ingest, markets, keeper, WS, news, groups, admin API
 packages/shared   Shared types + resolution helpers
 programs/whistle  Anchor program (USDC escrow + settle/claim)
-docs/TECH.md      Architecture + TxLINE endpoints
+infra/playground  Docker Compose + Caddy production stack
+docs/             TECH, DEPLOY, DEMO, SUBMISSION, TASKS
 ```
 
 ## Quick start
 
 ```bash
-# from repo root
-cp .env.example .env
+cp .env.example .env   # includes ADMIN_API_KEY + placeholder TXLINE_API_TOKEN
 npm install
 npm run build -w @whistle/shared
-
-# terminal 1 — API (demo mode if no TXLINE_API_TOKEN)
-npm run dev:api
-
-# terminal 2 — web
-npm run dev:web
+npm run dev:api        # :4000
+npm run dev:web        # :3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000). Admin: [http://localhost:3000/admin](http://localhost:3000/admin) with `ADMIN_API_KEY` from `.env`.
 
-### TxLINE credentials (optional for live data)
+### Data sources
 
-1. Follow [World Cup Free Tier](https://txline.txodds.com/documentation/worldcup) on **devnet**
-2. Set `TXLINE_GUEST_JWT` and `TXLINE_API_TOKEN` in `.env`
-3. Restart the API — fixtures/SSE switch from demo to live
+| Priority | Source | When |
+|----------|--------|------|
+| 1 | TxLINE REST + SSE | Real `TXLINE_API_TOKEN` (not `txl_…` placeholder) |
+| 2 | TheSportsDB (free, no key) | Placeholder token or TxLINE unreachable |
+| News | Public RSS | Always — no API key |
 
-Without credentials the API seeds demo fixtures and advances `demo-wc-001` toward full-time so you can demo stake → settle → claim.
+There is **no demo mode**. `DEMO_MODE` / `ALLOW_SANDBOX` crash boot if set.
 
 ### On-chain program
 
 ```bash
-# requires Solana + Anchor CLI
 anchor build
 anchor deploy --provider.cluster devnet
 ```
 
-Set `WHISTLE_PROGRAM_ID` and `SOLANA_KEYPAIR_PATH` for the keeper’s optional on-chain settle path.
+Set `WHISTLE_PROGRAM_ID` when the program is live.
 
 ## Scripts
 
@@ -71,14 +70,15 @@ Set `WHISTLE_PROGRAM_ID` and `SOLANA_KEYPAIR_PATH` for the keeper’s optional o
 | `npm run build` | Build shared, api, web |
 | `npm run activate-txline -w @whistle/api` | TxLINE activation helper |
 
-## Docs & agents
+## Docs
 
-- [AGENTS.md](./AGENTS.md) — operating rules for AI/human contributors
-- [CONTRIBUTING.md](./CONTRIBUTING.md) — branch/PR checklist
-- [docs/TECH.md](./docs/TECH.md) — architecture + TxLINE endpoints
-- Cursor project hooks in `.cursor/hooks.json` + rules in `.cursor/rules/`
-- CI: `.github/workflows/ci.yml` (Node check + `cargo check`)
+- [docs/DEPLOY.md](./docs/DEPLOY.md) — VPS production deploy
+- [docs/TECH.md](./docs/TECH.md) — architecture
+- [docs/TASKS.md](./docs/TASKS.md) — checklist
+- [docs/SUBMISSION.md](./docs/SUBMISSION.md) — Superteam package
+- [docs/DEMO.md](./docs/DEMO.md) — Loom shot list
+- [AGENTS.md](./AGENTS.md) — contributor / agent rules
 
-## License
+## Observability
 
-MIT
+`GET /api/live` · `GET /api/ready` · `GET /api/health` · `GET /api/metrics`

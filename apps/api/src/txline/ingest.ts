@@ -13,117 +13,118 @@ import {
   sseUrl,
   txlineHeaders,
 } from "./client";
-import { getState, mutate, pushNotification } from "../store";
+import { fetchPublicFixtures } from "../fixtures/publicSchedule";
+import { getState, mutate } from "../store";
 import { maybeSettleFixture } from "../settlement/keeper";
 import { lockMarket, voidMarketsForFixture } from "../markets/service";
+import { bumpMetric, getLogger, markIngest } from "../observability";
 
-function seedDemoFixtures(): Fixture[] {
-  const now = Date.now();
-  const hour = 60 * 60 * 1000;
-  return [
-    {
-      id: "demo-wc-001",
-      competition: "FIFA World Cup",
-      round: "Group A",
-      group: "A",
-      kickoffTs: now - 35 * 60 * 1000,
-      status: "live",
-      home: { name: "Mexico", shortName: "MEX" },
-      away: { name: "South Africa", shortName: "RSA" },
-      score: { home: 1, away: 0 },
-    },
-    {
-      id: "demo-wc-002",
-      competition: "FIFA World Cup",
-      round: "Group B",
-      group: "B",
-      kickoffTs: now + 2 * hour,
-      status: "scheduled",
-      home: { name: "Canada", shortName: "CAN" },
-      away: { name: "Qatar", shortName: "QAT" },
-    },
-    {
-      id: "demo-wc-003",
-      competition: "FIFA World Cup",
-      round: "Group C",
-      group: "C",
-      kickoffTs: now + 5 * hour,
-      status: "scheduled",
-      home: { name: "Brazil", shortName: "BRA" },
-      away: { name: "Morocco", shortName: "MAR" },
-    },
-    {
-      id: "demo-wc-004",
-      competition: "FIFA World Cup",
-      round: "Group D",
-      group: "D",
-      kickoffTs: now - 2 * hour,
-      status: "finished",
-      home: { name: "France", shortName: "FRA" },
-      away: { name: "USA", shortName: "USA" },
-      score: { home: 2, away: 1 },
-    },
-    {
-      id: "demo-wc-005",
-      competition: "FIFA World Cup",
-      round: "Group E",
-      group: "E",
-      kickoffTs: now + 26 * hour,
-      status: "scheduled",
-      home: { name: "Germany", shortName: "GER" },
-      away: { name: "Japan", shortName: "JPN" },
-    },
-    {
-      id: "demo-wc-006",
-      competition: "International Friendly",
-      round: "Friendly",
-      kickoffTs: now + 90 * 60 * 1000,
-      status: "scheduled",
-      home: { name: "Argentina", shortName: "ARG" },
-      away: { name: "Spain", shortName: "ESP" },
-    },
-  ];
+const log = () => getLogger().child({ module: "ingest" });
+
+export type FixtureSource = "txline" | "thesportsdb";
+
+let activeSource: FixtureSource = "txline";
+
+export function getFixtureSource(): FixtureSource {
+  return activeSource;
 }
 
-export async function bootstrapFixtures(cfg: TxlineConfig | null, demoMode: boolean) {
-  if (demoMode || !cfg?.apiToken) {
+function wipeLegacyDemoIds(s: {
+  fixtures: Record<string, Fixture>;
+  live: Record<string, unknown>;
+  odds: Record<string, unknown>;
+}) {
+  for (const id of Object.keys(s.fixtures)) {
+    if (id.startsWith("sandbox-") || id.startsWith("demo-")) {
+      delete s.fixtures[id];
+      delete s.live[id];
+      delete s.odds[id];
+    }
+  }
+}
+
+async function loadPublicBoard() {
+  const fixtures = await fetchPublicFixtures();
+  activeSource = "thesportsdb";
+  mutate((s) => {
+    wipeLegacyDemoIds(s);
+    s.fixtures = {};
+    for (const f of fixtures) s.fixtures[f.id] = f;
+  }, "fixtures", fixtures);
+  markIngest();
+  log().info({ count: fixtures.length, source: activeSource }, "board ready");
+}
+
+export async function bootstrapFixtures(cfg: TxlineConfig | null) {
+  if (cfg?.apiToken && !cfg.apiToken.startsWith("txl_")) {
+    // Prefer real TxLINE when token does not look like our local placeholder
+    try {
+      const fixtures = await fetchFixtures(cfg);
+      if (!fixtures.length) throw new Error("TxLINE returned zero fixtures");
+      activeSource = "txline";
+      mutate((s) => {
+        wipeLegacyDemoIds(s);
+        for (const f of fixtures) s.fixtures[f.id] = f;
+      }, "fixtures", fixtures);
+      markIngest();
+      log().info({ count: fixtures.length }, "loaded TxLINE fixtures");
+
+      const scores = await fetchScoresSnapshot(cfg);
+      mutate((s) => {
+        for (const sc of scores) {
+          s.live[sc.fixtureId] = sc;
+          const f = s.fixtures[sc.fixtureId];
+          if (f) {
+            f.score = { home: sc.homeScore, away: sc.awayScore };
+            f.status = sc.status;
+          }
+        }
+      }, "scores", scores);
+      return;
+    } catch (err) {
+      log().warn({ err }, "TxLINE bootstrap failed — using public sports API");
+    }
+  } else if (cfg?.apiToken) {
+    // Placeholder token: try TxLINE once, then public API
+    try {
+      const fixtures = await fetchFixtures(cfg);
+      if (fixtures.length) {
+        activeSource = "txline";
+        mutate((s) => {
+          wipeLegacyDemoIds(s);
+          for (const f of fixtures) s.fixtures[f.id] = f;
+        }, "fixtures", fixtures);
+        markIngest();
+        log().info({ count: fixtures.length }, "loaded TxLINE fixtures");
+        return;
+      }
+    } catch (err) {
+      log().warn({ err }, "placeholder TxLINE token rejected — public sports API");
+    }
+  }
+
+  await loadPublicBoard();
+}
+
+export async function refreshFixtures(cfg: TxlineConfig | null) {
+  if (activeSource === "txline" && cfg?.apiToken) {
+    const fixtures = await fetchFixtures(cfg);
+    if (!fixtures.length) return;
     mutate((s) => {
-      for (const f of seedDemoFixtures()) s.fixtures[f.id] = f;
-    }, "fixtures", Object.values(getState().fixtures));
-    console.log(`[ingest] seeded ${Object.keys(getState().fixtures).length} demo fixtures`);
+      for (const f of fixtures) {
+        const prev = s.fixtures[f.id];
+        s.fixtures[f.id] = prev ? { ...prev, ...f, score: f.score ?? prev.score } : f;
+      }
+    }, "fixtures", fixtures);
+    markIngest();
     return;
   }
-
-  try {
-    const fixtures = await fetchFixtures(cfg);
-    mutate((s) => {
-      for (const f of fixtures) s.fixtures[f.id] = f;
-    }, "fixtures", fixtures);
-    console.log(`[ingest] loaded ${fixtures.length} TxLINE fixtures`);
-
-    const scores = await fetchScoresSnapshot(cfg);
-    mutate((s) => {
-      for (const sc of scores) {
-        s.live[sc.fixtureId] = sc;
-        const f = s.fixtures[sc.fixtureId];
-        if (f) {
-          f.score = { home: sc.homeScore, away: sc.awayScore };
-          f.status = sc.status;
-        }
-      }
-    }, "scores", scores);
-  } catch (err) {
-    console.warn("[ingest] TxLINE fixtures failed, falling back to demo:", err);
-    mutate((s) => {
-      for (const f of seedDemoFixtures()) {
-        if (!s.fixtures[f.id]) s.fixtures[f.id] = f;
-      }
-    }, "fixtures", Object.values(getState().fixtures));
-  }
+  await loadPublicBoard();
 }
 
 function applyScoreUpdate(update: ReturnType<typeof normalizeScoreUpdate>) {
   if (!update) return;
+  markIngest();
   mutate((s) => {
     s.live[update.fixtureId] = update;
     const f = s.fixtures[update.fixtureId];
@@ -132,15 +133,7 @@ function applyScoreUpdate(update: ReturnType<typeof normalizeScoreUpdate>) {
       f.status = update.status;
       f.period = update.period;
     } else {
-      s.fixtures[update.fixtureId] = {
-        id: update.fixtureId,
-        kickoffTs: Date.now(),
-        status: update.status,
-        home: { name: "Home" },
-        away: { name: "Away" },
-        score: { home: update.homeScore, away: update.awayScore },
-        competition: "World Cup",
-      };
+      log().warn({ fixtureId: update.fixtureId }, "score for unknown fixture");
     }
   }, "score", update);
 
@@ -169,8 +162,13 @@ function applyScoreUpdate(update: ReturnType<typeof normalizeScoreUpdate>) {
 }
 
 export function startSseIngest(cfg: TxlineConfig) {
+  if (activeSource !== "txline") {
+    log().info("SSE skipped — board sourced from public sports API");
+    return () => undefined;
+  }
+
   const scoresUrl = sseUrl(cfg, "scores");
-  console.log(`[ingest] connecting scores SSE ${scoresUrl}`);
+  log().info({ scoresUrl }, "connecting scores SSE");
 
   const es = new EventSource(scoresUrl, {
     fetch: (input, init) =>
@@ -189,7 +187,7 @@ export function startSseIngest(cfg: TxlineConfig) {
       const items = Array.isArray(data) ? data : [data];
       for (const item of items) {
         const fixture = normalizeFixture(item);
-        if (fixture) {
+        if (fixture && fixture.home.name !== "Home") {
           mutate((s) => {
             s.fixtures[fixture.id] = { ...s.fixtures[fixture.id], ...fixture };
           }, "fixture", fixture);
@@ -197,12 +195,13 @@ export function startSseIngest(cfg: TxlineConfig) {
         applyScoreUpdate(normalizeScoreUpdate(item));
       }
     } catch (err) {
-      console.warn("[ingest] scores parse error", err);
+      log().warn({ err }, "scores parse error");
     }
   };
 
-  es.onerror = (err) => {
-    console.warn("[ingest] scores SSE error", err);
+  es.onerror = () => {
+    bumpMetric("sseReconnects");
+    log().warn("scores SSE error — EventSource will retry");
   };
 
   try {
@@ -242,51 +241,14 @@ export function startSseIngest(cfg: TxlineConfig) {
             s.odds[fixtureId] = list.slice(-40);
           }
         }, "odds", null);
+        markIngest();
       } catch {
-        // ignore malformed odds frames
+        // ignore
       }
     };
   } catch (err) {
-    console.warn("[ingest] odds SSE unavailable", err);
+    log().warn({ err }, "odds SSE unavailable");
   }
 
   return () => es.close();
-}
-
-/** Demo clock that advances a live demo match toward full-time for settlement demos. */
-export function startDemoMatchSimulator() {
-  const id = "demo-wc-001";
-  let ticks = 0;
-  const timer = setInterval(() => {
-    ticks += 1;
-    const state = getState();
-    const f = state.fixtures[id];
-    if (!f || f.status === "finished") return;
-
-    let home = f.score?.home ?? 0;
-    let away = f.score?.away ?? 0;
-    if (ticks === 3) home = 1;
-    if (ticks === 6) away = 1;
-    if (ticks === 9) home = 2;
-
-    const finished = ticks >= 12;
-    applyScoreUpdate({
-      fixtureId: id,
-      homeScore: home,
-      awayScore: away,
-      status: finished ? "finished" : "live",
-      action: finished ? "game_finalised" : "score_update",
-      statusId: finished ? 100 : 2,
-      period: finished ? 100 : 2,
-      clock: finished ? "FT" : `${Math.min(90, 40 + ticks * 4)}'`,
-      ts: Date.now(),
-    });
-
-    if (finished) {
-      pushNotification("settle", `${f.home.name} ${home}-${away} ${f.away.name} — full time`);
-      clearInterval(timer);
-    }
-  }, 15_000);
-
-  return () => clearInterval(timer);
 }

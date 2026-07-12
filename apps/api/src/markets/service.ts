@@ -1,4 +1,4 @@
-import { randomUUID } from "crypto";
+import { randomBytes, randomUUID } from "crypto";
 import {
   CreateMarketRequest,
   DepositRequest,
@@ -147,7 +147,8 @@ export function voidMarket(marketId: string, reason = "match abandoned") {
 
 export function voidMarketsForFixture(fixtureId: string, reason?: string) {
   const markets = Object.values(getState().markets).filter(
-    (m) => m.fixtureId === fixtureId && m.status === "open"
+    (m) =>
+      m.fixtureId === fixtureId && (m.status === "open" || m.status === "locked")
   );
   return markets.map((m) => voidMarket(m.id, reason));
 }
@@ -199,7 +200,7 @@ export function claimPosition(positionId: string, owner: string) {
 }
 
 export function createSquad(name: string, creator: string): Squad {
-  const inviteCode = Math.random().toString(36).slice(2, 8).toUpperCase();
+  const inviteCode = randomBytes(4).toString("hex").toUpperCase();
   const squad: Squad = {
     id: randomUUID(),
     name,
@@ -266,8 +267,14 @@ export function positionsForOwner(owner: string) {
   const state = getState();
   return Object.values(state.positions)
     .filter((p) => p.owner === owner)
-    .map((p) => ({
-      ...p,
-      market: state.markets[p.marketId],
-    }));
+    .map((p) => {
+      const market = state.markets[p.marketId];
+      const fixture = market ? state.fixtures[market.fixtureId] : undefined;
+      return {
+        ...p,
+        market,
+        fixture,
+      };
+    })
+    .sort((a, b) => b.createdAt - a.createdAt);
 }

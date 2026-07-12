@@ -4,10 +4,13 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useIdentity } from "../lib/identity";
+import { useRuntime } from "../lib/runtime";
 import { shortAddr } from "../lib/api";
 
 const links = [
-  { href: "/", label: "Fixtures" },
+  { href: "/", label: "Markets" },
+  { href: "/groups", label: "Groups" },
+  { href: "/news", label: "News" },
   { href: "/positions", label: "Positions" },
   { href: "/squads", label: "Squads" },
 ];
@@ -15,40 +18,23 @@ const links = [
 export function Nav() {
   const pathname = usePathname();
   const { owner, isConnected } = useIdentity();
+  const { meta } = useRuntime();
 
   return (
-    <header
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "1rem",
-        padding: "1.1rem 1.5rem",
-        borderBottom: "1px solid var(--line)",
-        position: "sticky",
-        top: 0,
-        zIndex: 40,
-        backdropFilter: "blur(12px)",
-        background: "rgba(8, 20, 13, 0.75)",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: "1.75rem" }}>
-        <Link href="/" className="display" style={{ fontSize: "1.35rem", fontWeight: 800 }}>
+    <header className="site-header">
+      <div style={{ display: "flex", alignItems: "center", gap: "1.5rem" }}>
+        <Link href="/" className="brand">
+          <span className="brand-mark" aria-hidden />
           Whistle
         </Link>
-        <nav style={{ display: "flex", gap: "1rem" }}>
+        <nav className="nav-links">
           {links.map((l) => {
-            const active = pathname === l.href;
+            const active =
+              l.href === "/"
+                ? pathname === "/"
+                : pathname === l.href || pathname.startsWith(`${l.href}/`);
             return (
-              <Link
-                key={l.href}
-                href={l.href}
-                style={{
-                  color: active ? "var(--amber)" : "var(--chalk-dim)",
-                  fontWeight: active ? 700 : 500,
-                  fontSize: "0.95rem",
-                }}
-              >
+              <Link key={l.href} href={l.href} className={`nav-link${active ? " active" : ""}`}>
                 {l.label}
               </Link>
             );
@@ -56,8 +42,9 @@ export function Nav() {
         </nav>
       </div>
       <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-        <span style={{ color: "var(--chalk-dim)", fontSize: "0.85rem" }}>
-          {isConnected ? shortAddr(owner) : owner}
+        <span className="mode-pill live">Live · {meta.network}</span>
+        <span className="mono" style={{ color: "var(--mute)", fontSize: "0.78rem" }}>
+          {isConnected && owner ? shortAddr(owner) : "Connect wallet"}
         </span>
         <WalletMultiButton />
       </div>

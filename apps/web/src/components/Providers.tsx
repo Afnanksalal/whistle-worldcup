@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import {
   ConnectionProvider,
   WalletProvider,
@@ -9,6 +9,7 @@ import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import "@solana/wallet-adapter-react-ui/styles.css";
 import { IdentityProvider } from "../lib/identity";
+import { RuntimeProvider } from "../lib/runtime";
 
 export function Providers({ children }: { children: ReactNode }) {
   const endpoint =
@@ -19,7 +20,9 @@ export function Providers({ children }: { children: ReactNode }) {
     <ConnectionProvider endpoint={endpoint}>
       <WalletProvider wallets={wallets} autoConnect>
         <WalletModalProvider>
-          <IdentityProvider>{children}</IdentityProvider>
+          <RuntimeProvider>
+            <IdentityProvider>{children}</IdentityProvider>
+          </RuntimeProvider>
         </WalletModalProvider>
       </WalletProvider>
     </ConnectionProvider>

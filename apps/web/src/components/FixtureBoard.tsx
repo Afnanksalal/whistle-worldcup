@@ -61,26 +61,31 @@ export function FixtureBoard() {
   );
 
   return (
-    <section className="rise" style={{ padding: "0 1.5rem 3rem", maxWidth: 1100, margin: "0 auto" }}>
+    <section className="shell rise" style={{ padding: "0 0 3.5rem" }}>
       <div
         style={{
           display: "flex",
           flexWrap: "wrap",
-          gap: "0.5rem",
+          gap: "0.75rem",
           marginBottom: "1.5rem",
-          alignItems: "center",
+          alignItems: "end",
           justifyContent: "space-between",
         }}
       >
-        <h2 className="display" style={{ fontSize: "1.6rem", margin: 0 }}>
-          Tournament board
-        </h2>
-        <div style={{ display: "flex", gap: "0.4rem" }}>
+        <div>
+          <p className="eyebrow" style={{ marginBottom: "0.5rem" }}>
+            Order book
+          </p>
+          <h2 className="display" style={{ fontSize: "1.75rem", margin: 0 }}>
+            Active fixtures
+          </h2>
+        </div>
+        <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap" }}>
           {(["all", "live", "upcoming", "finished"] as const).map((f) => (
             <button
               key={f}
               className={filter === f ? "btn btn-primary" : "btn btn-ghost"}
-              style={{ padding: "0.4rem 0.9rem", fontSize: "0.85rem" }}
+              style={{ padding: "0.4rem 0.85rem", fontSize: "0.8rem" }}
               onClick={() => setFilter(f)}
             >
               {f}
@@ -90,81 +95,73 @@ export function FixtureBoard() {
       </div>
 
       {error && (
-        <div className="panel" style={{ padding: "1rem", marginBottom: "1rem", color: "#ffb4b4" }}>
-          API offline — start `@whistle/api` on port 4000. ({error})
+        <div className="panel" style={{ padding: "1rem", marginBottom: "1rem", color: "var(--signal)" }}>
+          Markets offline — start the API. ({error})
         </div>
       )}
 
       {groups.map((g) => (
-        <div key={g} style={{ marginBottom: "2rem" }}>
+        <div key={g} style={{ marginBottom: "1.75rem" }}>
           <h3
+            className="mono"
             style={{
-              color: "var(--chalk-dim)",
-              fontSize: "0.8rem",
+              color: "var(--mute)",
+              fontSize: "0.7rem",
+              letterSpacing: "0.14em",
               textTransform: "uppercase",
-              letterSpacing: "0.12em",
-              marginBottom: "0.75rem",
+              marginBottom: "0.65rem",
+              fontWeight: 500,
             }}
           >
             {g}
           </h3>
-          <div style={{ display: "grid", gap: "0.75rem" }}>
+          <div style={{ display: "grid", gap: "0.55rem" }}>
             {filtered
               .filter((f) => (f.group || f.round || "Tournament") === g)
               .map((f) => (
-                <Link
-                  key={f.id}
-                  href={`/match/${f.id}`}
-                  className="panel"
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr auto",
-                    gap: "1rem",
-                    padding: "1.1rem 1.25rem",
-                    alignItems: "center",
-                    transition: "border-color 0.2s ease, transform 0.2s ease",
-                  }}
-                >
+                <Link key={f.id} href={`/match/${f.id}`} className="panel ticket">
                   <div>
                     <div
                       style={{
                         display: "flex",
                         alignItems: "center",
                         gap: "0.5rem",
-                        marginBottom: "0.45rem",
+                        marginBottom: "0.4rem",
                       }}
                     >
                       {f.status === "live" && <span className="live-dot" />}
                       <span
+                        className="mono"
                         style={{
-                          fontSize: "0.75rem",
-                          fontWeight: 700,
+                          fontSize: "0.7rem",
+                          fontWeight: 600,
+                          letterSpacing: "0.06em",
                           color:
                             f.status === "live"
-                              ? "#ff6b6b"
+                              ? "var(--signal)"
                               : f.status === "finished"
-                                ? "var(--amber)"
-                                : "var(--chalk-dim)",
+                                ? "var(--cyan)"
+                                : "var(--mute)",
                         }}
                       >
                         {statusLabel(f.status)}
-                        {f.score ? ` · ${f.score.home}-${f.score.away}` : ""}
+                        {f.score ? `  ${f.score.home}-${f.score.away}` : ""}
                       </span>
-                      <span style={{ color: "var(--chalk-dim)", fontSize: "0.8rem" }}>
+                      <span className="mono" style={{ color: "var(--mute)", fontSize: "0.7rem" }}>
                         {formatKickoff(f.kickoffTs)}
                       </span>
                     </div>
-                    <div className="display" style={{ fontSize: "1.25rem", fontWeight: 700 }}>
+                    <div className="display" style={{ fontSize: "1.2rem", fontWeight: 700 }}>
                       {f.home.name}{" "}
-                      <span style={{ color: "var(--chalk-dim)", fontWeight: 500 }}>vs</span>{" "}
+                      <span style={{ color: "var(--mute)", fontWeight: 500 }}>vs</span>{" "}
                       {f.away.name}
                     </div>
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ color: "var(--amber)", fontWeight: 700 }}>
-                      ${poolByFixture(f.id).toFixed(0)}
+                  <div className="pool-chip">
+                    ${poolByFixture(f.id).toFixed(0)}
+                    <div style={{ color: "var(--mute)", fontSize: "0.65rem", fontWeight: 500 }}>
+                      pool
                     </div>
-                    <div style={{ color: "var(--chalk-dim)", fontSize: "0.8rem" }}>in pools</div>
                   </div>
                 </Link>
               ))}
@@ -173,7 +170,11 @@ export function FixtureBoard() {
       ))}
 
       {!filtered.length && !error && (
-        <p style={{ color: "var(--chalk-dim)" }}>No fixtures in this filter yet.</p>
+        <div className="panel" style={{ padding: "1.5rem", color: "var(--mute)" }}>
+          {fixtures.length === 0
+            ? "No fixtures from the data feed yet — check API health / TxLINE credentials."
+            : "No fixtures in this filter."}
+        </div>
       )}
     </section>
   );

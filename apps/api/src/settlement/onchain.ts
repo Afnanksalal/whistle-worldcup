@@ -8,7 +8,6 @@ import {
   TransactionInstruction,
   sendAndConfirmTransaction,
 } from "@solana/web3.js";
-import bs58 from "bs58";
 
 /**
  * Submits a Whistle settle instruction when the program is deployed and
@@ -71,10 +70,7 @@ export async function submitOnchainSettle(args: {
     console.log("[onchain] settle tx", signature);
     return { signature };
   } catch (err) {
-    // Program may not be deployed yet — surface and fall back
     console.warn("[onchain] settle tx failed:", err);
-    return {
-      signature: `pending-devnet:${bs58.encode(Buffer.from(args.fixtureId)).slice(0, 16)}`,
-    };
+    return null;
   }
 }

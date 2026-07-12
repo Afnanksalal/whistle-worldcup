@@ -1,12 +1,8 @@
-# Whistle playground stack — own compose project, does not touch hana-chat :80/:443.
+# Whistle production stack on VPS — live TxLINE only, no demo mode.
 #
-# Serves https://<VPS_PUBLIC_IP>:9444  (web + /api + /ws)
-# TLS reuses the box IP cert from /opt/hana-chat/shared/letsencrypt (read-only).
+# Serves web + /api + /ws via Caddy (tunnel :8088 and/or TLS :9444).
 #
-# Run on Playground:
-#   cd /opt/whistle/infra/playground
-#   cp .env.example .env   # set VPS_PUBLIC_IP=18.61.174.6
-#   docker compose up -d --build
+# Required in .env: TXLINE_API_TOKEN, ADMIN_API_KEY (≥16 chars)
 
 services:
   api:
@@ -17,14 +13,20 @@ services:
     restart: unless-stopped
     environment:
       PORT: "4000"
-      DEMO_MODE: ${DEMO_MODE:-true}
+      NODE_ENV: production
       KEEP_SETTLE_ENABLED: "true"
-      API_CORS_ORIGIN: ${API_CORS_ORIGIN:-*}
+      API_CORS_ORIGIN: ${API_CORS_ORIGIN:-same-origin}
       TXLINE_NETWORK: ${TXLINE_NETWORK:-devnet}
       TXLINE_API_ORIGIN: ${TXLINE_API_ORIGIN:-https://txline-dev.txodds.com}
       TXLINE_GUEST_JWT: ${TXLINE_GUEST_JWT:-}
-      TXLINE_API_TOKEN: ${TXLINE_API_TOKEN:-}
+      TXLINE_API_TOKEN: ${TXLINE_API_TOKEN:?Set TXLINE_API_TOKEN}
+      ADMIN_API_KEY: ${ADMIN_API_KEY:?Set ADMIN_API_KEY}
       SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+      WHISTLE_PROGRAM_ID: ${WHISTLE_PROGRAM_ID:-}
+      REQUIRE_WALLET_AUTH: ${REQUIRE_WALLET_AUTH:-true}
+      NEWS_API_KEY: ${NEWS_API_KEY:-}
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-120}
     volumes:
       - whistle_api_data:/app/apps/api/data
     networks:
@@ -35,12 +37,12 @@ services:
           "CMD",
           "node",
           "-e",
-          "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+          "fetch('http://127.0.0.1:4000/api/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
         ]
       interval: 15s
       timeout: 5s
-      retries: 8
-      start_period: 20s
+      retries: 10
+      start_period: 40s
 
   web:
     build:
@@ -49,7 +51,6 @@ services:
       target: web
     restart: unless-stopped
     environment:
-      # Same-origin via Caddy — browser calls /api on this host
       NEXT_PUBLIC_API_URL: ""
       NEXT_PUBLIC_SOLANA_RPC: ${NEXT_PUBLIC_SOLANA_RPC:-https://api.devnet.solana.com}
     depends_on:

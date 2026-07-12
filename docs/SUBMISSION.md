@@ -5,30 +5,32 @@
 | Item | URL |
 |------|-----|
 | Public repo | https://github.com/Afnanksalal/whistle-worldcup |
-| Playground (live) | https://membership-public-gave-racks.trycloudflare.com |
-| API health | https://membership-public-gave-racks.trycloudflare.com/api/health |
+| Playground (live) | Cloudflare tunnel — see `docker logs playground-tunnel-1` on VPS |
+| API health | `{tunnel}/api/health` |
+| Admin | `{tunnel}/admin` |
 | Local web | http://localhost:3000 |
 | Local API | http://localhost:4000 |
 | Track | https://superteam.fun/earn/listing/prediction-markets-and-settlement/ |
 | Tasklist | [TASKS.md](./TASKS.md) |
 
-## TxLINE endpoints used
+## TxLINE + data
 
-See [TECH.md](./TECH.md).
+See [TECH.md](./TECH.md). Primary: TxLINE. Fallback schedule: TheSportsDB. News: public RSS (no key).
 
 ## Demo video
 
-Follow the shot list in [DEMO.md](./DEMO.md). Record Loom/YouTube ≤5 min showing:
+Follow [DEMO.md](./DEMO.md). Record Loom/YouTube ≤5 min:
 
 1. Problem (slow / opaque settlement during World Cup)
-2. Product walkthrough (fixtures → stake → live → settle → claim + Squads)
-3. How TxLINE powers fixtures/SSE/settlement
+2. Product walkthrough (markets → groups → news → stake → settle → claim + Squads)
+3. How data + keeper settlement work
 
 ## Deploy notes
 
-- Web + API run locally in demo mode out of the box (`DEMO_MODE` when no `TXLINE_API_TOKEN`)
-- Production deploy: [DEPLOY.md](./DEPLOY.md)
-- Anchor program: `cargo check -p whistle` passes; deploy with Anchor CLI + Solana when ready (`programs/whistle`)
+- **VPS only** (Docker + Caddy + tunnel). No Vercel.
+- Requires `TXLINE_API_TOKEN` + `ADMIN_API_KEY` on the host `.env`
+- Runbook: [DEPLOY.md](./DEPLOY.md)
+- Anchor: `cargo check -p whistle`; deploy when ready
 
 ## Feedback (paste into Superteam form)
 
