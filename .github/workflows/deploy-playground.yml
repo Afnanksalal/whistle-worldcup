@@ -59,8 +59,8 @@ jobs:
           if [ -d "$REMOTE_DIR/.git" ]; then
             cd "$REMOTE_DIR"
             git fetch origin
-            git checkout master || git checkout main
-            git pull --ff-only origin master || git pull --ff-only origin main
+            git checkout -f master
+            git reset --hard origin/master
           else
             git clone https://github.com/Afnanksalal/whistle-worldcup.git "$REMOTE_DIR"
             cd "$REMOTE_DIR"
