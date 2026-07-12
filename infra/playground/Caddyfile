@@ -3,7 +3,7 @@
 	default_sni {$VPS_PUBLIC_IP}
 }
 
-https://{$VPS_PUBLIC_IP}:{$WHISTLE_TLS_PORT} {
+https://{$VPS_PUBLIC_IP}:{$WHISTLE_TLS_PORT}, :{$WHISTLE_TLS_PORT} {
 	encode zstd gzip
 
 	header {
