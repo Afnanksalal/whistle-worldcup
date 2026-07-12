@@ -25,6 +25,19 @@ services:
       WHISTLE_PROGRAM_ID: ${WHISTLE_PROGRAM_ID:-}
       REQUIRE_WALLET_AUTH: ${REQUIRE_WALLET_AUTH:-true}
       NEWS_API_KEY: ${NEWS_API_KEY:-}
+      NEWS_CACHE_TTL_MS: ${NEWS_CACHE_TTL_MS:-480000}
+      NEWS_FETCH_TIMEOUT_MS: ${NEWS_FETCH_TIMEOUT_MS:-8000}
+      NEWS_RELEVANCE_MAX_AGE_MS: ${NEWS_RELEVANCE_MAX_AGE_MS:-604800000}
+      INSIGHT_MIN_POOL: ${INSIGHT_MIN_POOL:-25}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.6-luna}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.1-8b-instant}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-1.5-flash}
+      AI_REQUEST_TIMEOUT_MS: ${AI_REQUEST_TIMEOUT_MS:-12000}
+      AI_CACHE_TTL_MS: ${AI_CACHE_TTL_MS:-900000}
+      AI_MAX_OUTPUT_TOKENS: ${AI_MAX_OUTPUT_TOKENS:-180}
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RATE_LIMIT_PER_MIN: ${RATE_LIMIT_PER_MIN:-120}
     volumes:
@@ -49,10 +62,14 @@ services:
       context: ../..
       dockerfile: infra/playground/Dockerfile
       target: web
+      args:
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?Set NEXT_PUBLIC_SITE_URL to the public HTTPS origin}
     restart: unless-stopped
     environment:
       NEXT_PUBLIC_API_URL: ""
       NEXT_PUBLIC_SOLANA_RPC: ${NEXT_PUBLIC_SOLANA_RPC:-https://api.devnet.solana.com}
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?Set NEXT_PUBLIC_SITE_URL to the public HTTPS origin}
+      INTERNAL_API_URL: http://api:4000
     depends_on:
       api:
         condition: service_healthy

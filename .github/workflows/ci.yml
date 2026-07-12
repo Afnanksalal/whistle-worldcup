@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          node-version: "22.12.0"
           cache: npm
       - name: Install
         run: npm ci
@@ -25,7 +25,18 @@ jobs:
         run: npm run build -w @whistle/web
         env:
           NEXT_PUBLIC_API_URL: http://localhost:4000
+          NEXT_PUBLIC_SITE_URL: https://whistle.example
           NEXT_PUBLIC_SOLANA_RPC: https://api.devnet.solana.com
+      - name: SEO and crawler smoke
+        run: |
+          npm run start -w @whistle/web -- -p 3000 > /tmp/whistle-web.log 2>&1 &
+          WEB_PID=$!
+          trap 'kill $WEB_PID' EXIT
+          for attempt in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3000/ >/dev/null; then break; fi
+            sleep 1
+          done
+          SEO_BASE_URL=http://127.0.0.1:3000 npm run check:seo
 
   rust:
     name: Anchor program check

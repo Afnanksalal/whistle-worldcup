@@ -18,6 +18,7 @@ export type AppMeta = {
   stakeAsset: "USDC" | "units";
   requireWalletAuth: boolean;
   txlineConfigured: boolean;
+  fixtureSource?: "txline" | "thesportsdb";
   keepSettleEnabled: boolean;
   newsConfigured?: boolean;
 };
@@ -29,6 +30,7 @@ const defaultMeta: AppMeta = {
   stakeAsset: "units",
   requireWalletAuth: true,
   txlineConfigured: false,
+  fixtureSource: "thesportsdb",
   keepSettleEnabled: true,
 };
 

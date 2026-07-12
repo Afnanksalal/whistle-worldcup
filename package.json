@@ -15,9 +15,10 @@
     "test": "npm run test -w @whistle/shared",
     "start:api": "npm run start -w @whistle/api",
     "lint": "npm run lint -w @whistle/web --if-present",
-    "check": "npm run build:shared && npm test && npm run build -w @whistle/api"
+    "check": "npm run build:shared && npm test && npm test -w @whistle/api",
+    "check:seo": "node apps/web/scripts/seo-smoke.mjs"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22.12"
   }
 }

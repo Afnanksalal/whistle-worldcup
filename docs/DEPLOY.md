@@ -15,6 +15,7 @@
 ```bash
 TXLINE_API_TOKEN=...          # mandatory — API will not boot without it
 ADMIN_API_KEY=...             # ≥16 chars — settle/void/admin console
+NEXT_PUBLIC_SITE_URL=https://your-public-origin.example # canonical/OG/sitemap origin
 API_CORS_ORIGIN=same-origin   # behind Caddy; or explicit https://your.host
 NEWS_API_KEY=...              # optional; RSS fallback if unset
 WHISTLE_PROGRAM_ID=...        # optional until Anchor deploy
@@ -28,7 +29,7 @@ REQUIRE_WALLET_AUTH=true
 ```bash
 cd /opt/whistle && git fetch origin && git reset --hard origin/master
 cd infra/playground
-# edit .env — must include TXLINE_API_TOKEN + ADMIN_API_KEY
+# edit .env — must include TXLINE_API_TOKEN + ADMIN_API_KEY + NEXT_PUBLIC_SITE_URL
 docker compose up -d --build
 docker compose --profile tunnel up -d tunnel
 curl -sf http://127.0.0.1:8088/api/health
@@ -48,16 +49,21 @@ Structured JSON logs via pino. Request IDs on `x-request-id`.
 
 ## Admin
 
-Open `/admin` on the site, paste `ADMIN_API_KEY` (stored in browser localStorage only).
+Open `/admin` on the site and paste `ADMIN_API_KEY`. It is held in session storage and clears when the browser session ends.
 
 ## CI/CD
 
 | Workflow | Action |
 |----------|--------|
 | `ci.yml` | check + build |
-| `deploy-playground.yml` | SSH → pull → compose rebuild |
+| `deploy-playground.yml` | after successful master CI: SSH → pull → compose rebuild |
 
 Secrets: `PLAYGROUND_SSH_KEY`, `PLAYGROUND_HOST`, `PLAYGROUND_USER`.
+
+`NEXT_PUBLIC_SITE_URL` is a build input because canonical URLs, Open Graph tags,
+the sitemap, and LLM discovery files must agree on one public HTTPS origin. Use
+an owned stable domain for durable indexing; a quick-tunnel URL is suitable only
+while the competition deployment remains temporary.
 
 ## Local (still live-only)
 

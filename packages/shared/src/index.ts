@@ -83,6 +83,22 @@ export interface InsightCard {
   tags: string[];
   ts: number;
   source: "engine" | "llm";
+  /** When the underlying evidence was last observed. */
+  asOf?: number;
+  /** Qualitative confidence only; never an outcome probability. */
+  confidence?: "low" | "medium" | "high";
+  /** Structured provenance retained for auditability and richer clients. */
+  evidence?: InsightEvidence[];
+  /** Explicitly distinguishes an honest wait state from a generated signal. */
+  reason?: "insufficient_evidence";
+}
+
+export interface InsightEvidence {
+  kind: "pool" | "score" | "stats" | "event" | "table" | "news";
+  label: string;
+  source: string;
+  asOf: number;
+  url?: string;
 }
 
 export interface OddsQuote {

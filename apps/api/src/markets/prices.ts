@@ -13,18 +13,19 @@ export function recordMarketPrice(marketId: string) {
     implied: impliedShares(market.outcomes),
     outcomes: { ...market.outcomes },
   };
+  const existing = getState().priceHistory[marketId] || [];
+  const last = existing[existing.length - 1];
+  // Price history is event-driven. Unchanged heartbeat points caused a full
+  // state rewrite per market and erased useful history after ~80 minutes.
+  if (
+    last &&
+    last.totalPool === point.totalPool &&
+    JSON.stringify(last.implied) === JSON.stringify(point.implied)
+  ) {
+    return;
+  }
   mutate((s) => {
     const list = s.priceHistory[marketId] || [];
-    const last = list[list.length - 1];
-    // Avoid duplicate stamps when nothing moved
-    if (
-      last &&
-      last.totalPool === point.totalPool &&
-      JSON.stringify(last.implied) === JSON.stringify(point.implied) &&
-      point.ts - last.ts < 15_000
-    ) {
-      return;
-    }
     list.push(point);
     s.priceHistory[marketId] = list.slice(-MAX_POINTS);
   }, "price", point);

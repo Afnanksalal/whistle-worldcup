@@ -1,58 +1,73 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams } from "next/navigation";
 import Link from "next/link";
+import { useParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Fixture, MarketPool, Squad } from "@whistle/shared";
 import { api, formatKickoff, shortAddr } from "../../../lib/api";
 import { useIdentity } from "../../../lib/identity";
+import { useRuntime } from "../../../lib/runtime";
+import { BrandMark } from "../../../components/BrandMark";
 
 type Leader = { owner: string; staked: number; won: number; pnl: number };
+type Notice = { tone: "success" | "error"; text: string };
 
 export default function SquadDetailPage() {
   const params = useParams();
   const id = String(params.id);
   const { owner, ready, withWalletAuth } = useIdentity();
+  const { stakeLabel } = useRuntime();
   const [squad, setSquad] = useState<Squad | null>(null);
   const [markets, setMarkets] = useState<MarketPool[]>([]);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
   const [allFixtures, setAllFixtures] = useState<Fixture[]>([]);
   const [leaderboard, setLeaderboard] = useState<Leader[]>([]);
   const [fixtureId, setFixtureId] = useState("");
-  const [msg, setMsg] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
 
-  const load = async () => {
-    const res = await api<{
+  const load = useCallback(async (signal?: AbortSignal) => {
+    const response = await api<{
       squad: Squad;
       markets: MarketPool[];
       fixtures: Fixture[];
       leaderboard: Leader[];
-    }>(`/squads/${id}`);
-    setSquad(res.squad);
-    setMarkets(res.markets);
-    setFixtures(res.fixtures || []);
-    setLeaderboard(res.leaderboard);
-  };
-
-  useEffect(() => {
-    load().catch((e) => setMsg(String(e)));
+    }>(`/squads/${id}`, { signal });
+    setSquad(response.squad);
+    setMarkets(response.markets);
+    setFixtures(response.fixtures || []);
+    setLeaderboard(response.leaderboard);
   }, [id]);
 
   useEffect(() => {
-    api<{ fixtures: Fixture[] }>("/fixtures")
-      .then((r) => {
-        const open = r.fixtures.filter(
-          (f) => f.status === "scheduled" || f.status === "live"
+    const controller = new AbortController();
+    void load(controller.signal).catch((cause) => {
+      if (!controller.signal.aborted) {
+        setNotice({
+          tone: "error",
+          text: cause instanceof Error ? cause.message : "This squad could not be loaded.",
+        });
+      }
+    });
+    return () => controller.abort();
+  }, [load]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void api<{ fixtures: Fixture[] }>("/fixtures", { signal: controller.signal })
+      .then((response) => {
+        const open = response.fixtures.filter(
+          (fixture) => fixture.status === "scheduled" || fixture.status === "live"
         );
         setAllFixtures(open);
-        if (open[0] && !fixtureId) setFixtureId(open[0].id);
+        setFixtureId((current) => current || open[0]?.id || "");
       })
       .catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => controller.abort();
   }, []);
 
   const createMarket = async () => {
     if (!fixtureId || !owner) return;
+    setNotice(null);
     try {
       const headers = await withWalletAuth();
       await api(`/squads/${id}/markets`, {
@@ -64,24 +79,37 @@ export default function SquadDetailPage() {
           creator: owner,
         }),
       });
-      setMsg("Squad market opened");
+      setNotice({ tone: "success", text: "The 1X2 pool is open for your squad." });
       await load();
-    } catch (e) {
-      setMsg(String(e));
+    } catch (cause) {
+      setNotice({
+        tone: "error",
+        text: cause instanceof Error ? cause.message : "This pool could not be opened.",
+      });
     }
   };
 
-  const fixtureLabel = (fid: string) => {
-    const f =
-      allFixtures.find((x) => x.id === fid) || fixtures.find((x) => x.id === fid);
-    if (!f) return fid;
-    return `${f.home.name} vs ${f.away.name}`;
+  const fixtureLabel = (fixtureIdToFind: string) => {
+    const fixture =
+      allFixtures.find((item) => item.id === fixtureIdToFind) ||
+      fixtures.find((item) => item.id === fixtureIdToFind);
+    if (!fixture) return fixtureIdToFind;
+    return `${fixture.home.name} vs ${fixture.away.name}`;
   };
+
+  const totalPool = useMemo(
+    () => markets.reduce((total, market) => total + market.totalPool, 0),
+    [markets]
+  );
 
   if (!squad) {
     return (
-      <main className="shell" style={{ padding: "2rem 0", color: "var(--mute)" }}>
-        {msg || "Loading squad…"}
+      <main id="main-content" className="squads-page">
+        <div className="shell squad-detail-loading" role={notice?.tone === "error" ? "alert" : "status"}>
+          <BrandMark className="empty-brand-mark" accessibleLabel={null} />
+          <p>{notice?.text || "Opening the squad room…"}</p>
+          {notice?.tone === "error" && <Link href="/squads" className="text-link">Back to squads <span>→</span></Link>}
+        </div>
       </main>
     );
   }
@@ -89,127 +117,149 @@ export default function SquadDetailPage() {
   const isMember = owner ? squad.members.includes(owner) : false;
 
   return (
-    <main className="shell" style={{ padding: "2rem 0 4rem" }}>
-      <p style={{ color: "var(--mute)", marginBottom: "0.35rem" }}>
-        <Link href="/squads" style={{ color: "var(--cyan)" }}>
-          ← Squads
-        </Link>
-      </p>
-      <h1 className="display rise" style={{ fontSize: "2.1rem", marginBottom: "0.25rem" }}>
-        {squad.name}
-      </h1>
-      <p style={{ color: "var(--mute)" }}>
-        Invite{" "}
-        <strong className="mono" style={{ color: "var(--cyan)" }}>
-          {squad.inviteCode}
-        </strong>
-        {owner ? (
-          <>
-            {" "}
-            · you are <span className="mono">{shortAddr(owner)}</span>
-            {isMember ? "" : " (not a member)"}
-          </>
-        ) : (
-          " · connect wallet to participate"
-        )}
-      </p>
-      {msg && (
-        <p className="mono" style={{ color: "var(--cyan)", fontSize: "0.85rem" }}>
-          {msg}
-        </p>
-      )}
+    <main id="main-content" className="squads-page squad-detail-page">
+      <div className="shell squads-shell">
+        <Link href="/squads" className="squad-back-link"><span aria-hidden>←</span> All squads</Link>
 
-      <div className="panel" style={{ padding: "1.25rem", margin: "1.5rem 0" }}>
-        <h2 className="display" style={{ fontSize: "1.15rem", marginTop: 0 }}>
-          Open a squad market
-        </h2>
-        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <select
-            className="field"
-            value={fixtureId}
-            onChange={(e) => setFixtureId(e.target.value)}
-            style={{ flex: 1, minWidth: 220 }}
-          >
-            {!allFixtures.length && <option value="">No open fixtures</option>}
-            {allFixtures.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.home.name} vs {f.away.name} · {formatKickoff(f.kickoffTs)}
-              </option>
-            ))}
-          </select>
-          <button
-            className="btn btn-primary"
-            disabled={!ready || !isMember || !fixtureId}
-            onClick={createMarket}
-          >
-            Create 1X2 pool
-          </button>
-        </div>
-      </div>
-
-      <h2 className="display" style={{ fontSize: "1.25rem" }}>
-        Leaderboard
-      </h2>
-      <div style={{ display: "grid", gap: "0.45rem", marginBottom: "2rem" }}>
-        {leaderboard.map((row, i) => (
-          <div
-            key={row.owner}
-            className="panel"
-            style={{
-              padding: "0.85rem 1rem",
-              display: "grid",
-              gridTemplateColumns: "2rem 1fr auto",
-              gap: "0.75rem",
-              alignItems: "center",
-            }}
-          >
-            <span className="mono" style={{ color: "var(--cyan)", fontWeight: 700 }}>
-              #{i + 1}
-            </span>
-            <span className="mono">{shortAddr(row.owner)}</span>
-            <span
-              className="mono"
-              style={{
-                color: row.pnl >= 0 ? "var(--cyan)" : "var(--signal)",
-                fontWeight: 700,
-              }}
-            >
-              {row.pnl >= 0 ? "+" : ""}
-              {row.pnl.toFixed(2)}
-            </span>
+        <header className="squad-detail-header">
+          <div>
+            <p className="section-kicker">Private matchday room</p>
+            <h1>{squad.name}</h1>
+            <div className="squad-member-line">
+              <span className={`squad-member-state${isMember ? " is-member" : ""}`}>
+                {isMember ? "Squad member" : "Viewing room"}
+              </span>
+              {owner ? <span>Signed in as <strong className="mono">{shortAddr(owner)}</strong></span> : <span>Connect to take part</span>}
+            </div>
           </div>
-        ))}
-        {!leaderboard.length && (
-          <p style={{ color: "var(--mute)" }}>No stakes yet — open a market and play.</p>
-        )}
-      </div>
+          <aside className="squad-invite-card" aria-label={`Invite code ${squad.inviteCode}`}>
+            <span>Invite code</span>
+            <strong className="mono">{squad.inviteCode}</strong>
+            <small>Share privately with your group</small>
+          </aside>
+        </header>
 
-      <h2 className="display" style={{ fontSize: "1.25rem" }}>
-        Squad markets
-      </h2>
-      <div style={{ display: "grid", gap: "0.5rem" }}>
-        {markets.map((m) => (
-          <Link
-            key={m.id}
-            href={`/match/${m.fixtureId}?squad=${id}`}
-            className="panel"
-            style={{
-              padding: "0.9rem 1.1rem",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
+        <section className="squad-pulse" aria-label="Squad summary">
+          <div><span>Members</span><strong>{squad.members.length}</strong></div>
+          <div><span>Match pools</span><strong>{markets.length}</strong></div>
+          <div><span>Total in pools</span><strong>{totalPool.toLocaleString()} <small>{stakeLabel}</small></strong></div>
+        </section>
+
+        {notice && (
+          <div
+            className={`squads-notice is-${notice.tone}`}
+            role={notice.tone === "error" ? "alert" : "status"}
           >
-            <span>
-              {fixtureLabel(m.fixtureId)} ·{" "}
-              {m.marketType === "match_result" ? "1X2" : `O/U ${m.line}`} · {m.status}
-            </span>
-            <span className="mono" style={{ color: "var(--cyan)" }}>
-              ${m.totalPool.toFixed(0)}
-            </span>
-          </Link>
-        ))}
-        {!markets.length && <p style={{ color: "var(--mute)" }}>No squad markets yet.</p>}
+            {notice.text}
+          </div>
+        )}
+
+        <section className="squad-market-maker" aria-labelledby="squad-market-maker-title">
+          <div>
+            <p className="section-kicker">Choose the next match</p>
+            <h2 id="squad-market-maker-title">Open a squad pool</h2>
+            <p>Start one winner-takes-share 1X2 pool for the whole room.</p>
+          </div>
+          <div className="squad-market-control">
+            <label htmlFor="squad-fixture">Fixture</label>
+            <select
+              id="squad-fixture"
+              className="field"
+              value={fixtureId}
+              onChange={(event) => setFixtureId(event.target.value)}
+            >
+              {!allFixtures.length && <option value="">No open fixtures</option>}
+              {allFixtures.map((fixture) => (
+                <option key={fixture.id} value={fixture.id}>
+                  {fixture.home.name} vs {fixture.away.name} · {formatKickoff(fixture.kickoffTs)}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="btn btn-primary"
+              disabled={!ready || !isMember || !fixtureId}
+              onClick={() => void createMarket()}
+            >
+              Open 1X2 pool
+            </button>
+          </div>
+          {ready && !isMember && <small className="squad-market-help">Join this squad before opening a pool.</small>}
+        </section>
+
+        <div className="squad-detail-grid">
+          <section className="squad-leaderboard" aria-labelledby="squad-leaderboard-title">
+            <div className="squads-section-heading">
+              <div>
+                <p className="section-kicker">Form table</p>
+                <h2 id="squad-leaderboard-title">Leaderboard</h2>
+              </div>
+              <span>{leaderboard.length} ranked</span>
+            </div>
+
+            {leaderboard.length ? (
+              <div className="squad-leader-list">
+                <div className="squad-leader-labels" aria-hidden>
+                  <span>Rank / player</span><span>Staked</span><span>Won</span><span>P/L</span>
+                </div>
+                {leaderboard.map((row, index) => (
+                  <div className="squad-leader-row" key={row.owner}>
+                    <span className="squad-rank">{String(index + 1).padStart(2, "0")}</span>
+                    <strong className="mono">{shortAddr(row.owner)}</strong>
+                    <span><small>Staked</small>{row.staked.toFixed(0)}</span>
+                    <span><small>Won</small>{row.won.toFixed(0)}</span>
+                    <span className={row.pnl >= 0 ? "is-positive" : "is-negative"}>
+                      <small>P/L</small>{row.pnl >= 0 ? "+" : ""}{row.pnl.toFixed(2)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">
+                <strong>No picks on the board</strong>
+                <p>Open a match pool to start the squad table.</p>
+              </div>
+            )}
+          </section>
+
+          <section className="squad-markets" aria-labelledby="squad-markets-title">
+            <div className="squads-section-heading">
+              <div>
+                <p className="section-kicker">Room pools</p>
+                <h2 id="squad-markets-title">Squad markets</h2>
+              </div>
+              <span>{markets.length} total</span>
+            </div>
+
+            {markets.length ? (
+              <div className="squad-market-list">
+                {markets.map((market) => (
+                  <Link
+                    key={market.id}
+                    href={`/match/${market.fixtureId}?squad=${id}`}
+                    className="squad-market-row"
+                  >
+                    <span className={`squad-market-status is-${market.status}`}>{market.status}</span>
+                    <span className="squad-market-name">
+                      <strong>{fixtureLabel(market.fixtureId)}</strong>
+                      <small>{market.marketType === "match_result" ? "Match result · 1X2" : `Goals · O/U ${market.line}`}</small>
+                    </span>
+                    <span className="squad-market-pool">
+                      <small>Pool</small>
+                      <strong>{market.totalPool.toLocaleString()} {stakeLabel}</strong>
+                    </span>
+                    <span className="squad-list-arrow" aria-hidden>→</span>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">
+                <strong>No squad pools yet</strong>
+                <p>Choose an upcoming fixture above to open the room’s first market.</p>
+              </div>
+            )}
+          </section>
+        </div>
       </div>
     </main>
   );

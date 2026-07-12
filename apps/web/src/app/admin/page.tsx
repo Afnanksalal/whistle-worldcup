@@ -33,7 +33,7 @@ export default function AdminPage() {
   const [selected, setSelected] = useState<string>("");
 
   useEffect(() => {
-    const k = localStorage.getItem(KEY) || "";
+    const k = sessionStorage.getItem(KEY) || "";
     setKey(k);
     setSaved(k);
   }, []);
@@ -55,7 +55,7 @@ export default function AdminPage() {
   }, [saved, load]);
 
   const persist = () => {
-    localStorage.setItem(KEY, key.trim());
+    sessionStorage.setItem(KEY, key.trim());
     setSaved(key.trim());
     setMsg("Admin key saved locally");
   };
@@ -83,7 +83,7 @@ export default function AdminPage() {
         Admin
       </h1>
       <p style={{ color: "var(--mute)", maxWidth: 520 }}>
-        Protected by ADMIN_API_KEY. Key is stored in this browser only — never commit it.
+        Protected by ADMIN_API_KEY. The key is kept only for this browser tab session.
       </p>
 
       <div className="panel" style={{ padding: "1.1rem", margin: "1.25rem 0", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>

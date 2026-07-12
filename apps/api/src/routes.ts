@@ -12,7 +12,6 @@ import {
   lockMarket,
   marketImplied,
   positionsForOwner,
-  settleMarketOffchain,
   squadLeaderboard,
   voidMarket,
   voidMarketsForFixture,
@@ -38,6 +37,11 @@ declare global {
   }
 }
 
+function publicFixture(fixture: Fixture): Omit<Fixture, "raw"> {
+  const { raw: _raw, ...safe } = fixture;
+  return safe;
+}
+
 export function requestContext(req: Request, res: Response, next: NextFunction) {
   const id = (req.header("x-request-id") || randomUUID()).slice(0, 36);
   req.requestId = id;
@@ -53,6 +57,11 @@ export function createRouter(cfg: AppConfig) {
   const router = Router();
   const admin = requireAdmin(cfg);
   const walletOwner = requireWalletOwner(cfg);
+  const totalLine = z
+    .number()
+    .positive()
+    .max(20)
+    .refine((line) => Number.isInteger(line * 2), "line must be a half-goal value");
 
   router.get("/health", (_req, res) => {
     const state = getState();
@@ -102,7 +111,10 @@ export function createRouter(cfg: AppConfig) {
     if (round) fixtures = fixtures.filter((f) => f.round === round);
     if (status) fixtures = fixtures.filter((f) => f.status === status);
     fixtures.sort((a: Fixture, b: Fixture) => a.kickoffTs - b.kickoffTs);
-    res.json({ fixtures, meta: publicMeta(cfg, getFixtureSource()) });
+    res.json({
+      fixtures: fixtures.map(publicFixture),
+      meta: publicMeta(cfg, getFixtureSource()),
+    });
   });
 
   router.get("/fixtures/:id", async (req, res) => {
@@ -122,7 +134,7 @@ export function createRouter(cfg: AppConfig) {
     }
 
     res.json({
-      fixture,
+      fixture: publicFixture(fixture),
       live,
       odds,
       markets,
@@ -158,7 +170,11 @@ export function createRouter(cfg: AppConfig) {
   });
 
   router.get("/groups", (_req, res) => {
-    res.json({ groups: buildGroupTables(), rounds: listRounds() });
+    const groups = buildGroupTables().map((group) => ({
+      ...group,
+      fixtures: group.fixtures.map(publicFixture),
+    }));
+    res.json({ groups, rounds: listRounds() });
   });
 
   router.get("/news", async (_req, res) => {
@@ -201,7 +217,7 @@ export function createRouter(cfg: AppConfig) {
     const schema = z.object({
       fixtureId: z.string(),
       marketType: z.enum(["match_result", "total_goals"]),
-      line: z.number().optional(),
+      line: totalLine.optional(),
       squadId: z.string().optional(),
     });
     const parsed = schema.safeParse(req.body);
@@ -212,7 +228,11 @@ export function createRouter(cfg: AppConfig) {
     if (parsed.data.squadId && !getState().squads[parsed.data.squadId]) {
       return res.status(404).json({ error: "squad not found" });
     }
-    res.json({ market: ensureMarket(parsed.data) });
+    try {
+      res.json({ market: ensureMarket(parsed.data) });
+    } catch (e) {
+      res.status(409).json({ error: String(e) });
+    }
   });
 
   router.post("/squads/:id/markets", walletOwner, (req, res) => {
@@ -225,7 +245,7 @@ export function createRouter(cfg: AppConfig) {
     const schema = z.object({
       fixtureId: z.string(),
       marketType: z.enum(["match_result", "total_goals"]).default("match_result"),
-      line: z.number().optional(),
+      line: totalLine.optional(),
       creator: z.string().min(1),
     });
     const parsed = schema.safeParse(req.body);
@@ -233,14 +253,18 @@ export function createRouter(cfg: AppConfig) {
     if (!getState().fixtures[parsed.data.fixtureId]) {
       return res.status(404).json({ error: "fixture not found" });
     }
-    res.json({
-      market: ensureMarket({
-        fixtureId: parsed.data.fixtureId,
-        marketType: parsed.data.marketType,
-        line: parsed.data.line,
-        squadId: squad.id,
-      }),
-    });
+    try {
+      res.json({
+        market: ensureMarket({
+          fixtureId: parsed.data.fixtureId,
+          marketType: parsed.data.marketType,
+          line: parsed.data.line,
+          squadId: squad.id,
+        }),
+      });
+    } catch (e) {
+      res.status(409).json({ error: String(e) });
+    }
   });
 
   router.get("/markets/:id", (req, res) => {
@@ -282,20 +306,20 @@ export function createRouter(cfg: AppConfig) {
     if (!parsed.success) return res.status(400).json(parsed.error.flatten());
     const market = getState().markets[req.params.id];
     if (!market) return res.status(404).json({ error: "not found" });
-    await maybeSettleFixture(
+    const attempt = await maybeSettleFixture(
       market.fixtureId,
       parsed.data.homeScore,
       parsed.data.awayScore
     );
-    const updated =
-      getState().markets[req.params.id]?.status === "settled"
-        ? getState().markets[req.params.id]
-        : settleMarketOffchain(
-            req.params.id,
-            parsed.data.homeScore,
-            parsed.data.awayScore
-          );
-    res.json({ market: updated });
+    const updated = getState().markets[req.params.id];
+    if (attempt.status === "pending" || attempt.status === "disabled") {
+      return res.status(409).json({
+        error: attempt.reason || "settlement verification pending",
+        settlement: attempt,
+        market: updated,
+      });
+    }
+    res.json({ market: updated, settlement: attempt });
   });
 
   router.post("/markets/:id/void", admin, (req, res) => {
@@ -341,7 +365,11 @@ export function createRouter(cfg: AppConfig) {
   router.get("/positions", (req, res) => {
     const owner = String(req.query.owner || "");
     if (!owner) return res.status(400).json({ error: "owner required" });
-    res.json({ positions: positionsForOwner(owner) });
+    const positions = positionsForOwner(owner).map((position) => ({
+      ...position,
+      fixture: position.fixture ? publicFixture(position.fixture) : undefined,
+    }));
+    res.json({ positions });
   });
 
   router.get("/notifications", (_req, res) => {
@@ -386,13 +414,19 @@ export function createRouter(cfg: AppConfig) {
     res.json({
       squad,
       markets,
-      fixtures,
+      fixtures: fixtures.map(publicFixture),
       leaderboard: squadLeaderboard(squad.id),
     });
   });
 
   router.get("/squads", (_req, res) => {
-    res.json({ squads: Object.values(getState().squads) });
+    const squads = Object.values(getState().squads).map((squad) => ({
+      id: squad.id,
+      name: squad.name,
+      createdAt: squad.createdAt,
+      memberCount: squad.members.length,
+    }));
+    res.json({ squads });
   });
 
   return router;

@@ -13,6 +13,8 @@ type TsdbEvent = {
   strEvent?: string;
   strHomeTeam?: string;
   strAwayTeam?: string;
+  strHomeTeamBadge?: string;
+  strAwayTeamBadge?: string;
   strLeague?: string;
   strSeason?: string;
   dateEvent?: string;
@@ -65,47 +67,73 @@ function toFixture(ev: TsdbEvent): Fixture | null {
     group: ev.strGroup || undefined,
     kickoffTs: kickoffTs(ev.dateEvent, ev.strTime),
     status: statusFrom(ev.strStatus, hasScore),
-    home: { name: ev.strHomeTeam, shortName: ev.strHomeTeam.slice(0, 3).toUpperCase() },
-    away: { name: ev.strAwayTeam, shortName: ev.strAwayTeam.slice(0, 3).toUpperCase() },
+    home: {
+      name: ev.strHomeTeam,
+      shortName: ev.strHomeTeam.slice(0, 3).toUpperCase(),
+      logo: ev.strHomeTeamBadge || undefined,
+    },
+    away: {
+      name: ev.strAwayTeam,
+      shortName: ev.strAwayTeam.slice(0, 3).toUpperCase(),
+      logo: ev.strAwayTeamBadge || undefined,
+    },
     score: hasScore ? { home: homeScore!, away: awayScore! } : undefined,
     venue: ev.strVenue || undefined,
     raw: ev,
   };
 }
 
+export function isCurrentWorldCupPublicFixture(
+  fixture: Fixture,
+  currentYear = new Date().getUTCFullYear()
+): boolean {
+  return (
+    fixture.id.startsWith("tsdb-") &&
+    (fixture.competition || "").toLowerCase().includes("world cup") &&
+    new Date(fixture.kickoffTs).getUTCFullYear() === currentYear
+  );
+}
+
 async function getJson(url: string): Promise<unknown> {
-  const res = await fetch(url, { headers: { Accept: "application/json" } });
+  const res = await fetch(url, {
+    headers: { Accept: "application/json" },
+    signal: AbortSignal.timeout(8_000),
+  });
   if (!res.ok) throw new Error(`TheSportsDB ${res.status} ${url}`);
   return res.json();
 }
 
-/** World Cup + major international windows from TheSportsDB free endpoint. */
+/** Current World Cup fixtures from TheSportsDB's free endpoint. */
 export async function fetchPublicFixtures(): Promise<Fixture[]> {
   const log = getLogger().child({ module: "thesportsdb" });
   const urls = [
     // FIFA World Cup league id on TheSportsDB
     `${TSDB}/eventsseason.php?id=4429&s=2026`,
-    `${TSDB}/eventsseason.php?id=4429&s=2022`,
     `${TSDB}/eventsnextleague.php?id=4429`,
     `${TSDB}/eventspastleague.php?id=4429`,
-    // International friendlies / UEFA as density if WC empty
-    `${TSDB}/eventsnextleague.php?id=4480`,
   ];
 
   const byId = new Map<string, Fixture>();
-  for (const url of urls) {
-    try {
-      const data = (await getJson(url)) as { events?: TsdbEvent[] | null };
-      for (const ev of data.events || []) {
-        const f = toFixture(ev);
-        if (f) byId.set(f.id, f);
-      }
-    } catch (err) {
-      log.warn({ err, url }, "TheSportsDB fetch failed");
+  const batches = await Promise.allSettled(
+    urls.map(async (url) => ({
+      url,
+      data: (await getJson(url)) as { events?: TsdbEvent[] | null },
+    }))
+  );
+  for (const batch of batches) {
+    if (batch.status === "rejected") {
+      log.warn({ err: batch.reason }, "TheSportsDB fetch failed");
+      continue;
+    }
+    for (const ev of batch.value.data.events || []) {
+      const f = toFixture(ev);
+      if (f) byId.set(f.id, f);
     }
   }
 
-  let fixtures = [...byId.values()];
+  let fixtures = [...byId.values()].filter((fixture) =>
+    isCurrentWorldCupPublicFixture(fixture)
+  );
   if (!fixtures.length) {
     // Last-resort: search recent soccer events
     try {
@@ -116,7 +144,9 @@ export async function fetchPublicFixtures(): Promise<Fixture[]> {
         const f = toFixture(ev);
         if (f) byId.set(f.id, f);
       }
-      fixtures = [...byId.values()];
+      fixtures = [...byId.values()].filter((fixture) =>
+        isCurrentWorldCupPublicFixture(fixture)
+      );
     } catch (err) {
       log.warn({ err }, "TheSportsDB search failed");
     }

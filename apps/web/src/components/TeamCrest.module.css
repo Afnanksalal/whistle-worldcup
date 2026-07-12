@@ -1,0 +1,57 @@
+.teamCrestRoot {
+  --team-crest-size: 2.2rem;
+
+  position: relative;
+  display: inline-grid;
+  width: var(--team-crest-size);
+  height: var(--team-crest-size);
+  flex: none;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--paper);
+  color: var(--forest);
+  font-family: var(--font-data), monospace;
+  font-size: calc(var(--team-crest-size) * 0.22);
+  font-weight: 700;
+  letter-spacing: 0.035em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.teamCrestSmall {
+  --team-crest-size: 2rem;
+}
+
+.teamCrestFeatured {
+  --team-crest-size: 3.4rem;
+
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.teamCrestHero {
+  --team-crest-size: clamp(3.4rem, 7vw, 5.2rem);
+
+  border-color: var(--line-strong);
+  background: var(--forest-soft);
+}
+
+.teamCrestImage {
+  width: 78%;
+  height: 78%;
+  object-fit: contain;
+  filter: drop-shadow(0 1px 1px rgba(8, 38, 29, 0.08));
+}
+
+@media (max-width: 720px) {
+  .teamCrestFeatured {
+    --team-crest-size: 2.8rem;
+  }
+}
+
+@media (max-width: 620px) {
+  .teamCrestHero {
+    --team-crest-size: 3.2rem;
+  }
+}

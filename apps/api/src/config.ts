@@ -13,12 +13,17 @@ export type AppConfig = {
   solanaRpcUrl: string;
   settlementRail: "ledger" | "onchain";
   stakeAsset: "USDC" | "units";
+  onchainSettlementEnabled: boolean;
   logLevel: string;
   rateLimitPerMin: number;
 };
 
 function truthy(v: string | undefined): boolean {
   return v === "true" || v === "1" || v === "yes";
+}
+
+export function isPlaceholderTxlineToken(token: string): boolean {
+  return token.startsWith("txl_");
 }
 
 /**
@@ -54,9 +59,22 @@ export function loadConfig(): AppConfig {
       : "https://txline-dev.txodds.com");
 
   const whistleProgramId = (process.env.WHISTLE_PROGRAM_ID || "").trim() || null;
-  const settlementRail: "ledger" | "onchain" = whistleProgramId ? "onchain" : "ledger";
-  const stakeAsset: "USDC" | "units" =
-    process.env.STAKE_ASSET === "USDC" || whistleProgramId ? "USDC" : "units";
+  const onchainRequested =
+    truthy(process.env.ENABLE_ONCHAIN_SETTLEMENT) ||
+    process.env.SETTLEMENT_RAIL === "onchain" ||
+    process.env.STAKE_ASSET === "USDC";
+  if (onchainRequested) {
+    // The current API has no durable market-PDA mapping or verified user
+    // deposit/claim transaction path. Never advertise or accept USDC until
+    // that complete rail is deployed and startup-verified.
+    throw new Error(
+      "On-chain USDC rail is not production-ready in this build. Unset " +
+        "ENABLE_ONCHAIN_SETTLEMENT/SETTLEMENT_RAIL=onchain/STAKE_ASSET=USDC."
+    );
+  }
+  const onchainSettlementEnabled = false;
+  const settlementRail: "ledger" | "onchain" = "ledger";
+  const stakeAsset: "USDC" | "units" = "units";
 
   const corsRaw = process.env.API_CORS_ORIGIN;
   let corsOrigins: string[] | true | false;
@@ -89,6 +107,7 @@ export function loadConfig(): AppConfig {
     solanaRpcUrl: process.env.SOLANA_RPC_URL || "https://api.devnet.solana.com",
     settlementRail,
     stakeAsset,
+    onchainSettlementEnabled,
     logLevel: process.env.LOG_LEVEL || (isProd ? "info" : "debug"),
     rateLimitPerMin: Number(process.env.RATE_LIMIT_PER_MIN || 120),
   };
@@ -102,8 +121,14 @@ export function publicMeta(cfg: AppConfig, fixtureSource?: string) {
     settlementRail: cfg.settlementRail,
     stakeAsset: cfg.stakeAsset,
     requireWalletAuth: cfg.requireWalletAuth,
-    txlineConfigured: Boolean(cfg.apiToken) && !cfg.apiToken.startsWith("txl_"),
-    fixtureSource: fixtureSource || (cfg.apiToken.startsWith("txl_") ? "thesportsdb" : "txline"),
+    txlineConfigured: Boolean(cfg.apiToken) && !isPlaceholderTxlineToken(cfg.apiToken),
+    fixtureSource:
+      fixtureSource || (isPlaceholderTxlineToken(cfg.apiToken) ? "thesportsdb" : "txline"),
+    resultVerification:
+      fixtureSource === "txline" && !isPlaceholderTxlineToken(cfg.apiToken)
+        ? ("txline" as const)
+        : ("unavailable" as const),
+    onchainSettlementEnabled: cfg.onchainSettlementEnabled,
     keepSettleEnabled: cfg.keepSettleEnabled,
     newsConfigured: true,
     newsSource: "rss" as const,

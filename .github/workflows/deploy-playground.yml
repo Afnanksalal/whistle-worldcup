@@ -1,7 +1,9 @@
 name: Deploy Playground
 
 on:
-  push:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
     branches: [master, main]
   workflow_dispatch:
 
@@ -12,6 +14,7 @@ concurrency:
 jobs:
   deploy:
     name: Deploy to Playground VPS
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Require secrets
@@ -72,6 +75,7 @@ jobs:
           fi
           grep -q '^TXLINE_API_TOKEN=.\+' .env || { echo "TXLINE_API_TOKEN empty" >&2; exit 1; }
           grep -q '^ADMIN_API_KEY=.\+' .env || { echo "ADMIN_API_KEY empty" >&2; exit 1; }
+          grep -q '^NEXT_PUBLIC_SITE_URL=https://.\+' .env || { echo "NEXT_PUBLIC_SITE_URL must be a public HTTPS origin" >&2; exit 1; }
           docker compose up -d --build
           docker compose --profile tunnel up -d tunnel
           sleep 12
