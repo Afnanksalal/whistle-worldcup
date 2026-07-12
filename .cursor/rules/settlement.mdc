@@ -1,0 +1,13 @@
+---
+description: API and settlement patterns for apps/api and programs/whistle
+globs: apps/api/**/*.{ts,tsx},programs/whistle/**/*.rs,packages/shared/**/*.ts
+alwaysApply: false
+---
+
+# Settlement & API
+
+- Keeper settles `open` **and** `locked` markets on `game_finalised` / `statusId=100`.
+- Void path must refund full stake via claim; do not mark winners on void markets.
+- On-chain `settle` mapping must match `resolveMatchResult` / `resolveTotals`.
+- Prefer additive REST routes under `/api`; keep WS events for live fanout only.
+- Add or extend unit tests in `packages/shared` when changing resolution.

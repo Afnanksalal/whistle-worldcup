@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+    branches: [master, main, "feature/**"]
+  pull_request:
+    branches: [master, main]
+
+jobs:
+  check:
+    name: Build & test
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+      - name: Install
+        run: npm ci
+      - name: Shared build + unit tests
+        run: npm run check
+      - name: Web production build
+        run: npm run build -w @whistle/web
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:4000
+          NEXT_PUBLIC_SOLANA_RPC: https://api.devnet.solana.com
+
+  rust:
+    name: Anchor program check
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: cargo check
+        run: cargo check -p whistle

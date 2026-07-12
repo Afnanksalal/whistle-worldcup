@@ -15,6 +15,7 @@ import {
 } from "./client";
 import { getState, mutate, pushNotification } from "../store";
 import { maybeSettleFixture } from "../settlement/keeper";
+import { lockMarket, voidMarketsForFixture } from "../markets/service";
 
 function seedDemoFixtures(): Fixture[] {
   const now = Date.now();
@@ -142,6 +143,18 @@ function applyScoreUpdate(update: ReturnType<typeof normalizeScoreUpdate>) {
       };
     }
   }, "score", update);
+
+  if (update.status === "live") {
+    for (const m of Object.values(getState().markets)) {
+      if (m.fixtureId === update.fixtureId && m.status === "open") {
+        lockMarket(m.id);
+      }
+    }
+  }
+
+  if (update.status === "cancelled" || update.status === "postponed") {
+    voidMarketsForFixture(update.fixtureId, `fixture ${update.status}`);
+  }
 
   if (
     update.status === "finished" ||

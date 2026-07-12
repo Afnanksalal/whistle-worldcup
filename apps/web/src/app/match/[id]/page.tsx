@@ -231,6 +231,16 @@ export default function MatchPage() {
               >
                 {market.status === "open" ? "Lock stake" : `Market ${market.status}`}
               </button>
+              {market.status === "locked" && (
+                <p style={{ marginTop: "0.75rem", color: "var(--chalk-dim)", fontSize: "0.9rem" }}>
+                  Kickoff — stakes locked. Payouts unlock at full-time.
+                </p>
+              )}
+              {market.status === "void" && (
+                <p style={{ marginTop: "0.75rem", color: "#ffb4b4", fontWeight: 600 }}>
+                  Market voided — claim a full refund from Positions.
+                </p>
+              )}
               {msg && (
                 <p style={{ marginTop: "0.75rem", color: "var(--chalk-dim)", fontSize: "0.9rem" }}>
                   {msg}

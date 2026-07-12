@@ -8,10 +8,13 @@ import {
   ensureMarket,
   joinSquad,
   listMarkets,
+  lockMarket,
   marketImplied,
   positionsForOwner,
   settleMarketOffchain,
   squadLeaderboard,
+  voidMarket,
+  voidMarketsForFixture,
 } from "./markets/service";
 import { maybeSettleFixture } from "./settlement/keeper";
 import type { Fixture } from "@whistle/shared";
@@ -103,13 +106,12 @@ router.post("/markets/:id/settle", async (req, res) => {
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) return res.status(400).json(parsed.error.flatten());
   const market = getState().markets[req.params.id];
-  if (!market) return res.status(404).json({ error: "market not found" });
+  if (!market) return res.status(404).json({ error: "not found" });
   await maybeSettleFixture(
     market.fixtureId,
     parsed.data.homeScore,
     parsed.data.awayScore
   );
-  // Force settle this market if keeper didn't (e.g. scores mismatch path)
   const updated =
     getState().markets[req.params.id]?.status === "settled"
       ? getState().markets[req.params.id]
@@ -119,6 +121,32 @@ router.post("/markets/:id/settle", async (req, res) => {
           parsed.data.awayScore
         );
   res.json({ market: updated });
+});
+
+router.post("/markets/:id/void", (req, res) => {
+  const schema = z.object({ reason: z.string().optional() });
+  const parsed = schema.safeParse(req.body ?? {});
+  if (!parsed.success) return res.status(400).json(parsed.error.flatten());
+  try {
+    res.json({
+      market: voidMarket(req.params.id, parsed.data.reason || "match abandoned"),
+    });
+  } catch (e) {
+    res.status(400).json({ error: String(e) });
+  }
+});
+
+router.post("/fixtures/:id/void-markets", (req, res) => {
+  const reason = String(req.body?.reason || "fixture cancelled");
+  res.json({ markets: voidMarketsForFixture(req.params.id, reason) });
+});
+
+router.post("/markets/:id/lock", (req, res) => {
+  try {
+    res.json({ market: lockMarket(req.params.id) });
+  } catch (e) {
+    res.status(400).json({ error: String(e) });
+  }
 });
 
 router.post("/positions/:id/claim", (req, res) => {

@@ -101,7 +101,10 @@ export function settleMarketOffchain(
 ) {
   const market = getState().markets[marketId];
   if (!market) throw new Error("market not found");
-  if (market.status === "settled") return market;
+  if (market.status === "settled" || market.status === "void") return market;
+  if (market.status !== "open" && market.status !== "locked") {
+    throw new Error(`cannot settle market in status ${market.status}`);
+  }
 
   let winning: MarketOutcome;
   if (market.marketType === "match_result") {
@@ -127,6 +130,38 @@ export function settleMarketOffchain(
   return getState().markets[marketId];
 }
 
+export function voidMarket(marketId: string, reason = "match abandoned") {
+  const market = getState().markets[marketId];
+  if (!market) throw new Error("market not found");
+  if (market.status === "settled" || market.status === "void") return market;
+
+  mutate((s) => {
+    const m = s.markets[marketId];
+    m.status = "void";
+    m.settledAt = Date.now();
+  }, "void", { marketId, reason });
+
+  pushNotification("void", `Market voided — ${reason}. Stakes refundable.`, marketId);
+  return getState().markets[marketId];
+}
+
+export function voidMarketsForFixture(fixtureId: string, reason?: string) {
+  const markets = Object.values(getState().markets).filter(
+    (m) => m.fixtureId === fixtureId && m.status === "open"
+  );
+  return markets.map((m) => voidMarket(m.id, reason));
+}
+
+export function lockMarket(marketId: string) {
+  const market = getState().markets[marketId];
+  if (!market) throw new Error("market not found");
+  if (market.status !== "open") return market;
+  mutate((s) => {
+    s.markets[marketId].status = "locked";
+  }, "locked", { marketId });
+  return getState().markets[marketId];
+}
+
 export function claimPosition(positionId: string, owner: string) {
   const state = getState();
   const position = state.positions[positionId];
@@ -134,7 +169,17 @@ export function claimPosition(positionId: string, owner: string) {
   if (position.owner !== owner) throw new Error("not your position");
   if (position.claimed) throw new Error("already claimed");
   const market = state.markets[position.marketId];
-  if (!market || market.status !== "settled") throw new Error("market not settled");
+  if (!market) throw new Error("market not found");
+
+  if (market.status === "void") {
+    const payout = position.amount;
+    mutate((s) => {
+      s.positions[positionId].claimed = true;
+    }, "claim", { positionId, payout, refund: true });
+    return { position: getState().positions[positionId], payout, won: false, refund: true };
+  }
+
+  if (market.status !== "settled") throw new Error("market not settled");
   if (!market.winningOutcome) throw new Error("no winning outcome");
 
   const won = position.outcome === market.winningOutcome;
@@ -150,7 +195,7 @@ export function claimPosition(positionId: string, owner: string) {
     s.positions[positionId].claimed = true;
   }, "claim", { positionId, payout });
 
-  return { position: getState().positions[positionId], payout, won };
+  return { position: getState().positions[positionId], payout, won, refund: false };
 }
 
 export function createSquad(name: string, creator: string): Squad {

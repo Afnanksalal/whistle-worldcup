@@ -86,6 +86,11 @@ export default function PositionsPage() {
                       Claim
                     </button>
                   )}
+                  {m?.status === "void" && !p.claimed && (
+                    <button className="btn btn-primary" onClick={() => claim(p.id)}>
+                      Refund
+                    </button>
+                  )}
                   {p.claimed && (
                     <span style={{ color: "var(--chalk-dim)", fontSize: "0.85rem" }}>Claimed</span>
                   )}

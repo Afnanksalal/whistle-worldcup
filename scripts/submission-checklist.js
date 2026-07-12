@@ -23,8 +23,8 @@ for (const [file, label] of checks) {
 }
 console.log(`
 Remaining manual steps:
-1. Push public GitHub repo
-2. Deploy API + web (see docs/DEPLOY.md)
-3. Record Loom/YouTube demo ≤5 min
-4. Submit on Superteam Earn with TxLINE feedback
+1. Push public GitHub repo — DONE (https://github.com/Afnanksalal/whistle-worldcup)
+2. Deploy API + web to production hosts (see docs/DEPLOY.md) — local demo running; Vercel needs login
+3. Record Loom/YouTube demo ≤5 min (docs/DEMO.md)
+4. Submit on Superteam Earn with TxLINE feedback (docs/SUBMISSION.md)
 `);

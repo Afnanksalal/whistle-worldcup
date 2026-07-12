@@ -12,9 +12,11 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsc -p tsconfig.json --watch"
+    "dev": "tsc -p tsconfig.json --watch",
+    "test": "npm run build && node --test dist/resolution.test.js"
   },
   "devDependencies": {
+    "@types/node": "^22.13.10",
     "typescript": "^5.8.2"
   }
 }
