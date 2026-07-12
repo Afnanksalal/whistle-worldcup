@@ -14,6 +14,10 @@ Living checklist for Superteam World Cup track + production ops.
 - [x] Group stage tables (`/groups`)
 - [x] VPS Docker + Caddy deploy (no Vercel)
 - [x] CI + CD to Playground VPS
+- [x] Prediction graphs (pool implied-price history)
+- [x] Live match stats + event tape (TheSportsDB / TxLINE)
+- [x] AI insights desk (quantitative engine + optional LLM)
+- [x] Settled notification toasts removed
 
 ## Remaining
 

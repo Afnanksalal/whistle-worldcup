@@ -2,12 +2,11 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Providers } from "../components/Providers";
 import { Nav } from "../components/Nav";
-import { NotificationToasts } from "../components/NotificationToasts";
 
 export const metadata: Metadata = {
   title: "Whistle — World Cup prediction markets",
   description:
-    "Parimutuel World Cup pools with live match data, full-time settlement, and private squads.",
+    "Parimutuel World Cup pools with live match data, graphs, stats, and AI insights.",
 };
 
 export default function RootLayout({
@@ -22,7 +21,6 @@ export default function RootLayout({
           <div className="pitch-grid" style={{ minHeight: "100vh" }}>
             <Nav />
             {children}
-            <NotificationToasts />
           </div>
         </Providers>
       </body>

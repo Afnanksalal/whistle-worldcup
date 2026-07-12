@@ -52,6 +52,39 @@ export interface MatchEvent {
   detail?: string;
 }
 
+export interface MatchStats {
+  fixtureId: string;
+  updatedAt: number;
+  possession?: { home: number; away: number };
+  shots?: { home: number; away: number };
+  shotsOnTarget?: { home: number; away: number };
+  corners?: { home: number; away: number };
+  fouls?: { home: number; away: number };
+  yellowCards?: { home: number; away: number };
+  redCards?: { home: number; away: number };
+  offsides?: { home: number; away: number };
+  events: MatchEvent[];
+  source: string;
+}
+
+export interface PricePoint {
+  ts: number;
+  marketId: string;
+  totalPool: number;
+  implied: Record<string, number>;
+  outcomes: Record<string, number>;
+}
+
+export interface InsightCard {
+  id: string;
+  severity: "info" | "signal" | "alert";
+  title: string;
+  body: string;
+  tags: string[];
+  ts: number;
+  source: "engine" | "llm";
+}
+
 export interface OddsQuote {
   fixtureId: string;
   market: string;
