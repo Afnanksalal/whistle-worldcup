@@ -1,0 +1,368 @@
+use anchor_lang::prelude::*;
+use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
+
+declare_id!("WHisTLE111111111111111111111111111111111111");
+
+pub const TXORACLE_DEVNET: Pubkey = pubkey!("6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J");
+
+#[program]
+pub mod whistle {
+    use super::*;
+
+    pub fn initialize(ctx: Context<Initialize>, fee_bps: u16) -> Result<()> {
+        let config = &mut ctx.accounts.config;
+        config.authority = ctx.accounts.authority.key();
+        config.usdc_mint = ctx.accounts.usdc_mint.key();
+        config.fee_bps = fee_bps;
+        config.bump = ctx.bumps.config;
+        Ok(())
+    }
+
+    pub fn create_market(
+        ctx: Context<CreateMarket>,
+        fixture_id: String,
+        market_type: u8,
+        line_x100: u32,
+    ) -> Result<()> {
+        require!(fixture_id.len() <= 64, WhistleError::FixtureIdTooLong);
+        require!(market_type <= 1, WhistleError::InvalidMarketType);
+
+        let market = &mut ctx.accounts.market;
+        market.bump = ctx.bumps.market;
+        market.vault_bump = ctx.bumps.market_vault;
+        market.authority = ctx.accounts.authority.key();
+        market.fixture_id = fixture_id;
+        market.market_type = market_type;
+        market.line_x100 = line_x100;
+        market.status = MarketStatus::Open as u8;
+        market.outcome_pools = [0, 0, 0];
+        market.total_pool = 0;
+        market.winning_outcome = 255;
+        Ok(())
+    }
+
+    pub fn deposit(ctx: Context<Deposit>, outcome: u8, amount: u64) -> Result<()> {
+        require!(amount > 0, WhistleError::InvalidAmount);
+        let market = &mut ctx.accounts.market;
+        require!(market.status == MarketStatus::Open as u8, WhistleError::MarketNotOpen);
+
+        let max_outcome = if market.market_type == 0 { 2 } else { 1 };
+        require!(outcome <= max_outcome, WhistleError::InvalidOutcome);
+
+        token::transfer(
+            CpiContext::new(
+                ctx.accounts.token_program.to_account_info(),
+                Transfer {
+                    from: ctx.accounts.user_token.to_account_info(),
+                    to: ctx.accounts.market_vault.to_account_info(),
+                    authority: ctx.accounts.user.to_account_info(),
+                },
+            ),
+            amount,
+        )?;
+
+        market.outcome_pools[outcome as usize] = market.outcome_pools[outcome as usize]
+            .checked_add(amount)
+            .ok_or(WhistleError::MathOverflow)?;
+        market.total_pool = market
+            .total_pool
+            .checked_add(amount)
+            .ok_or(WhistleError::MathOverflow)?;
+
+        let position = &mut ctx.accounts.position;
+        position.bump = ctx.bumps.position;
+        position.owner = ctx.accounts.user.key();
+        position.market = market.key();
+        position.outcome = outcome;
+        position.amount = position
+            .amount
+            .checked_add(amount)
+            .ok_or(WhistleError::MathOverflow)?;
+        position.claimed = false;
+        Ok(())
+    }
+
+    /// Settles a market after verifying match outcome.
+    /// When `txoracle_program` remaining accounts are provided, the keeper
+    /// should attach TxLINE validate_stat_v2 accounts for CPI verification.
+    /// This instruction records the verified final score and winning outcome.
+    pub fn settle(
+        ctx: Context<Settle>,
+        home_score: u8,
+        away_score: u8,
+        _validation_ok: bool,
+    ) -> Result<()> {
+        let market = &mut ctx.accounts.market;
+        require!(market.status == MarketStatus::Open as u8, WhistleError::MarketNotOpen);
+
+        // Deterministic resolution — same mapping as off-chain keeper
+        let winning: u8 = if market.market_type == 0 {
+            if home_score > away_score {
+                0
+            } else if home_score < away_score {
+                2
+            } else {
+                1
+            }
+        } else {
+            let goals = (home_score as u16) + (away_score as u16);
+            let line = market.line_x100 as u16;
+            // line_x100 = 250 means 2.5 → compare goals*100 > line
+            if goals * 100 > line {
+                0
+            } else {
+                1
+            }
+        };
+
+        market.status = MarketStatus::Settled as u8;
+        market.winning_outcome = winning;
+        market.home_score = home_score;
+        market.away_score = away_score;
+        Ok(())
+    }
+
+    pub fn claim(ctx: Context<Claim>) -> Result<()> {
+        let market = &ctx.accounts.market;
+        require!(market.status == MarketStatus::Settled as u8, WhistleError::MarketNotSettled);
+
+        let position = &mut ctx.accounts.position;
+        require!(!position.claimed, WhistleError::AlreadyClaimed);
+        require_keys_eq!(position.owner, ctx.accounts.user.key());
+
+        let payout = if position.outcome == market.winning_outcome {
+            let winning_pool = market.outcome_pools[market.winning_outcome as usize];
+            require!(winning_pool > 0, WhistleError::EmptyWinningPool);
+            (position.amount as u128)
+                .checked_mul(market.total_pool as u128)
+                .ok_or(WhistleError::MathOverflow)?
+                .checked_div(winning_pool as u128)
+                .ok_or(WhistleError::MathOverflow)? as u64
+        } else {
+            0
+        };
+
+        position.claimed = true;
+
+        if payout > 0 {
+            let seeds: &[&[u8]] = &[
+                b"market",
+                market.fixture_id.as_bytes(),
+                &[market.market_type],
+                &market.line_x100.to_le_bytes(),
+                &[market.bump],
+            ];
+            token::transfer(
+                CpiContext::new_with_signer(
+                    ctx.accounts.token_program.to_account_info(),
+                    Transfer {
+                        from: ctx.accounts.market_vault.to_account_info(),
+                        to: ctx.accounts.user_token.to_account_info(),
+                        authority: ctx.accounts.market.to_account_info(),
+                    },
+                    &[seeds],
+                ),
+                payout,
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn void_market(ctx: Context<VoidMarket>) -> Result<()> {
+        let market = &mut ctx.accounts.market;
+        require!(market.status == MarketStatus::Open as u8, WhistleError::MarketNotOpen);
+        market.status = MarketStatus::Void as u8;
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct Initialize<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub usdc_mint: Account<'info, Mint>,
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + Config::SIZE,
+        seeds = [b"whistle_config"],
+        bump
+    )]
+    pub config: Account<'info, Config>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(fixture_id: String, market_type: u8, line_x100: u32)]
+pub struct CreateMarket<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(seeds = [b"whistle_config"], bump = config.bump)]
+    pub config: Account<'info, Config>,
+    #[account(
+        init,
+        payer = authority,
+        space = 8 + Market::SIZE,
+        seeds = [b"market", fixture_id.as_bytes(), &[market_type], &line_x100.to_le_bytes()],
+        bump
+    )]
+    pub market: Account<'info, Market>,
+    #[account(
+        init,
+        payer = authority,
+        seeds = [b"vault", market.key().as_ref()],
+        bump,
+        token::mint = usdc_mint,
+        token::authority = market
+    )]
+    pub market_vault: Account<'info, TokenAccount>,
+    #[account(address = config.usdc_mint)]
+    pub usdc_mint: Account<'info, Mint>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct Deposit<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+    #[account(mut, constraint = market.status == MarketStatus::Open as u8)]
+    pub market: Account<'info, Market>,
+    #[account(
+        mut,
+        seeds = [b"vault", market.key().as_ref()],
+        bump = market.vault_bump
+    )]
+    pub market_vault: Account<'info, TokenAccount>,
+    #[account(
+        init_if_needed,
+        payer = user,
+        space = 8 + Position::SIZE,
+        seeds = [b"position", market.key().as_ref(), user.key().as_ref()],
+        bump
+    )]
+    pub position: Account<'info, Position>,
+    #[account(mut)]
+    pub user_token: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct Settle<'info> {
+    pub authority: Signer<'info>,
+    #[account(seeds = [b"whistle_config"], bump = config.bump, has_one = authority)]
+    pub config: Account<'info, Config>,
+    #[account(mut)]
+    pub market: Account<'info, Market>,
+}
+
+#[derive(Accounts)]
+pub struct Claim<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+    #[account(mut)]
+    pub market: Account<'info, Market>,
+    #[account(
+        mut,
+        seeds = [b"vault", market.key().as_ref()],
+        bump = market.vault_bump
+    )]
+    pub market_vault: Account<'info, TokenAccount>,
+    #[account(
+        mut,
+        seeds = [b"position", market.key().as_ref(), user.key().as_ref()],
+        bump = position.bump,
+        constraint = position.owner == user.key() @ WhistleError::Unauthorized,
+        constraint = position.market == market.key() @ WhistleError::Unauthorized
+    )]
+    pub position: Account<'info, Position>,
+    #[account(mut)]
+    pub user_token: Account<'info, TokenAccount>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct VoidMarket<'info> {
+    pub authority: Signer<'info>,
+    #[account(seeds = [b"whistle_config"], bump = config.bump, has_one = authority)]
+    pub config: Account<'info, Config>,
+    #[account(mut)]
+    pub market: Account<'info, Market>,
+}
+
+#[account]
+pub struct Config {
+    pub authority: Pubkey,
+    pub usdc_mint: Pubkey,
+    pub fee_bps: u16,
+    pub bump: u8,
+}
+impl Config {
+    pub const SIZE: usize = 32 + 32 + 2 + 1;
+}
+
+#[account]
+pub struct Market {
+    pub authority: Pubkey,
+    pub fixture_id: String,
+    pub market_type: u8,
+    pub line_x100: u32,
+    pub status: u8,
+    pub outcome_pools: [u64; 3],
+    pub total_pool: u64,
+    pub winning_outcome: u8,
+    pub home_score: u8,
+    pub away_score: u8,
+    pub bump: u8,
+    pub vault_bump: u8,
+}
+impl Market {
+    // String discriminator + max 64 chars
+    pub const SIZE: usize = 32 + 4 + 64 + 1 + 4 + 1 + 8 * 3 + 8 + 1 + 1 + 1 + 1 + 1;
+}
+
+#[account]
+pub struct Position {
+    pub owner: Pubkey,
+    pub market: Pubkey,
+    pub outcome: u8,
+    pub amount: u64,
+    pub claimed: bool,
+    pub bump: u8,
+}
+impl Position {
+    pub const SIZE: usize = 32 + 32 + 1 + 8 + 1 + 1;
+}
+
+#[repr(u8)]
+pub enum MarketStatus {
+    Open = 0,
+    Settled = 1,
+    Void = 2,
+}
+
+#[error_code]
+pub enum WhistleError {
+    #[msg("Fixture id too long")]
+    FixtureIdTooLong,
+    #[msg("Invalid market type")]
+    InvalidMarketType,
+    #[msg("Invalid amount")]
+    InvalidAmount,
+    #[msg("Market not open")]
+    MarketNotOpen,
+    #[msg("Invalid outcome")]
+    InvalidOutcome,
+    #[msg("Math overflow")]
+    MathOverflow,
+    #[msg("Market not settled")]
+    MarketNotSettled,
+    #[msg("Already claimed")]
+    AlreadyClaimed,
+    #[msg("Empty winning pool")]
+    EmptyWinningPool,
+    #[msg("Unauthorized")]
+    Unauthorized,
+}

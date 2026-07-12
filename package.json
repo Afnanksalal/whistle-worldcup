@@ -1,0 +1,21 @@
+{
+  "name": "whistle",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @whistle/web",
+    "dev:api": "npm run dev -w @whistle/api",
+    "dev:web": "npm run dev -w @whistle/web",
+    "build": "npm run build -w @whistle/shared && npm run build -w @whistle/api && npm run build -w @whistle/web",
+    "build:shared": "npm run build -w @whistle/shared",
+    "start:api": "npm run start -w @whistle/api",
+    "lint": "npm run lint -w @whistle/web --if-present"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

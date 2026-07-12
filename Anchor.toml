@@ -1,0 +1,18 @@
+{
+  "toolchain": "anchor",
+  "programs": {
+    "localnet": {
+      "whistle": "WHisTLE111111111111111111111111111111111111"
+    },
+    "devnet": {
+      "whistle": "WHisTLE111111111111111111111111111111111111"
+    }
+  },
+  "provider": {
+    "cluster": "devnet",
+    "wallet": "./wallet.json"
+  },
+  "scripts": {
+    "test": "yarn run ts-mocha -p ./tsconfig.json -t 1000000 tests/**/*.ts"
+  }
+}
