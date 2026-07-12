@@ -2,7 +2,8 @@
 
 Tournament-native World Cup prediction pools. Take a side, watch live scores, get paid at full-time — then roll into the next kickoff.
 
-**Repo:** [github.com/Afnanksalal/whistle-worldcup](https://github.com/Afnanksalal/whistle-worldcup)
+**Repo:** [github.com/Afnanksalal/whistle-worldcup](https://github.com/Afnanksalal/whistle-worldcup)  
+**Live:** [https://18.61.174.6:9444](https://18.61.174.6:9444) (Playground VPS)
 
 Powered by [TxLINE](https://txline.txodds.com) sports data on Solana. Built for the [Superteam World Cup — Prediction Markets & Settlement](https://superteam.fun/earn/listing/prediction-markets-and-settlement/) track.
 

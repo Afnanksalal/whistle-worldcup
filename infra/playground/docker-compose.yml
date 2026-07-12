@@ -1,0 +1,87 @@
+# Whistle playground stack — own compose project, does not touch hana-chat :80/:443.
+#
+# Serves https://<VPS_PUBLIC_IP>:9444  (web + /api + /ws)
+# TLS reuses the box IP cert from /opt/hana-chat/shared/letsencrypt (read-only).
+#
+# Run on Playground:
+#   cd /opt/whistle/infra/playground
+#   cp .env.example .env   # set VPS_PUBLIC_IP=18.61.174.6
+#   docker compose up -d --build
+
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/playground/Dockerfile
+      target: api
+    restart: unless-stopped
+    environment:
+      PORT: "4000"
+      DEMO_MODE: ${DEMO_MODE:-true}
+      KEEP_SETTLE_ENABLED: "true"
+      API_CORS_ORIGIN: ${API_CORS_ORIGIN:-*}
+      TXLINE_NETWORK: ${TXLINE_NETWORK:-devnet}
+      TXLINE_API_ORIGIN: ${TXLINE_API_ORIGIN:-https://txline-dev.txodds.com}
+      TXLINE_GUEST_JWT: ${TXLINE_GUEST_JWT:-}
+      TXLINE_API_TOKEN: ${TXLINE_API_TOKEN:-}
+      SOLANA_RPC_URL: ${SOLANA_RPC_URL:-https://api.devnet.solana.com}
+    volumes:
+      - whistle_api_data:/app/apps/api/data
+    networks:
+      - whistle
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 20s
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/playground/Dockerfile
+      target: web
+    restart: unless-stopped
+    environment:
+      # Same-origin via Caddy — browser calls /api on this host
+      NEXT_PUBLIC_API_URL: ""
+      NEXT_PUBLIC_SOLANA_RPC: ${NEXT_PUBLIC_SOLANA_RPC:-https://api.devnet.solana.com}
+    depends_on:
+      api:
+        condition: service_healthy
+    networks:
+      - whistle
+
+  caddy:
+    image: caddy:2.10-alpine
+    restart: unless-stopped
+    environment:
+      VPS_PUBLIC_IP: ${VPS_PUBLIC_IP:?Set VPS_PUBLIC_IP}
+      WHISTLE_TLS_PORT: ${WHISTLE_TLS_PORT:-9444}
+    ports:
+      - "${WHISTLE_TLS_PORT:-9444}:${WHISTLE_TLS_PORT:-9444}"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /opt/hana-chat/shared/letsencrypt:/etc/letsencrypt:ro
+      - whistle_caddy_data:/data
+      - whistle_caddy_config:/config
+    depends_on:
+      - web
+      - api
+    networks:
+      - whistle
+
+networks:
+  whistle:
+    name: whistle-edge
+
+volumes:
+  whistle_api_data:
+  whistle_caddy_data:
+  whistle_caddy_config:
