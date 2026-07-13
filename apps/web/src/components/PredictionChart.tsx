@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Bar,
   CartesianGrid,
@@ -28,6 +28,16 @@ type Props = {
   labels: Record<string, string>;
 };
 
+const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+
+function chartTime(ts: number, useLocalTime: boolean) {
+  if (!useLocalTime) return `${new Date(ts).toISOString().slice(11, 16)} UTC`;
+  return new Date(ts).toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
 function compactPoints(points: PricePoint[]) {
   return points.filter((point, index) => {
     if (index === 0 || index === points.length - 1) return true;
@@ -41,6 +51,9 @@ function compactPoints(points: PricePoint[]) {
 
 export function PredictionChart({ history, labels }: Props) {
   const [range, setRange] = useState<Range>("60m");
+  const [useLocalTime, setUseLocalTime] = useState(false);
+
+  useEffect(() => setUseLocalTime(true), []);
   const latest = history[history.length - 1];
   const keys = Object.keys(latest?.implied || labels);
   const hasLiquidity = (latest?.totalPool || 0) > 0;
@@ -55,10 +68,7 @@ export function PredictionChart({ history, labels }: Props) {
   const data = ranged.map((point) => {
     const row: Record<string, number | string> = {
       ts: point.ts,
-      time: new Date(point.ts).toLocaleTimeString(undefined, {
-        hour: "2-digit",
-        minute: "2-digit",
-      }),
+      time: chartTime(point.ts, useLocalTime),
       pool: point.totalPool,
     };
     for (const key of keys) row[key] = Number(((point.implied[key] || 0) * 100).toFixed(2));
@@ -98,7 +108,7 @@ export function PredictionChart({ history, labels }: Props) {
       <div className="chart-summary">
         <div>
           <span>Total pool</span>
-          <strong>{hasLiquidity ? latest?.totalPool.toLocaleString() : "No stakes yet"}</strong>
+          <strong>{hasLiquidity ? number.format(latest?.totalPool || 0) : "No stakes yet"}</strong>
         </div>
         <div>
           <span>Largest move</span>
@@ -111,12 +121,7 @@ export function PredictionChart({ history, labels }: Props) {
         <div>
           <span>Last update</span>
           <strong>
-            {latest
-              ? new Date(latest.ts).toLocaleTimeString(undefined, {
-                  hour: "2-digit",
-                  minute: "2-digit",
-                })
-              : "Waiting"}
+            {latest ? chartTime(latest.ts, useLocalTime) : "Waiting"}
           </strong>
         </div>
       </div>
@@ -181,7 +186,7 @@ export function PredictionChart({ history, labels }: Props) {
                 }}
                 labelStyle={{ color: "#66736d", marginBottom: 5 }}
                 formatter={(value, name) => {
-                  if (name === "pool") return [Number(value).toLocaleString(), "Pool depth"];
+                  if (name === "pool") return [number.format(Number(value)), "Pool depth"];
                   return [`${Number(value).toFixed(1)}%`, labels[String(name)] || String(name)];
                 }}
               />

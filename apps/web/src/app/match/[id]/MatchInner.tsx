@@ -2,16 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useParams, useSearchParams } from "next/navigation";
-import type {
-  Fixture,
-  InsightCard,
-  LiveScoreUpdate,
-  MarketPool,
-  MatchStats,
-  OddsQuote,
-  PricePoint,
-} from "@whistle/shared";
+import type { Fixture, MatchForecast } from "@whistle/shared";
 import { impliedShares } from "@whistle/shared";
 import { api, formatKickoff, statusLabel } from "../../../lib/api";
 import { useIdentity } from "../../../lib/identity";
@@ -20,16 +11,9 @@ import { PredictionChart } from "../../../components/PredictionChart";
 import { MatchStatsPanel } from "../../../components/MatchStatsPanel";
 import { InsightsPanel } from "../../../components/InsightsPanel";
 import { TeamCrest } from "../../../components/TeamCrest";
-
-type Detail = {
-  fixture: Fixture;
-  live?: LiveScoreUpdate;
-  odds: OddsQuote[];
-  markets: MarketPool[];
-  priceHistory?: Record<string, PricePoint[]>;
-  stats?: MatchStats | null;
-  insights?: InsightCard[];
-};
+import { FootballLoader } from "../../../components/FootballLoader";
+import { ForecastPanel } from "../../../components/ForecastPanel";
+import type { MatchDetail } from "../../../lib/match-detail";
 
 const OUTCOME_LABELS: Record<string, string> = {
   home: "Home win",
@@ -39,22 +23,30 @@ const OUTCOME_LABELS: Record<string, string> = {
   under: "Under",
 };
 
+const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+
 function outcomeName(outcome: string, fixture: Fixture) {
   if (outcome === "home") return fixture.home.name;
   if (outcome === "away") return fixture.away.name;
   return OUTCOME_LABELS[outcome] || outcome;
 }
 
-export default function MatchPageInner() {
-  const params = useParams();
-  const search = useSearchParams();
-  const id = String(params.id);
-  const squadId = search.get("squad") || undefined;
+export default function MatchPageInner({
+  fixtureId: id,
+  squadId,
+  initialDetail,
+}: {
+  fixtureId: string;
+  squadId?: string;
+  initialDetail: MatchDetail;
+}) {
   const { owner, ready, withWalletAuth } = useIdentity();
   const { stakeLabel, meta } = useRuntime();
-  const [data, setData] = useState<Detail | null>(null);
+  const [data, setData] = useState<MatchDetail | null>(initialDetail);
   const [amount, setAmount] = useState(10);
-  const [selectedMarket, setSelectedMarket] = useState<string | null>(null);
+  const [selectedMarket, setSelectedMarket] = useState<string | null>(
+    initialDetail.markets[0]?.id || null
+  );
   const [selectedOutcome, setSelectedOutcome] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -63,8 +55,17 @@ export default function MatchPageInner() {
   const load = useCallback(async () => {
     try {
       const query = squadId ? `?squadId=${encodeURIComponent(squadId)}` : "";
-      const detail = await api<Detail>(`/fixtures/${id}${query}`);
+      const detail = await api<MatchDetail>(`/fixtures/${id}${query}`);
       setData(detail);
+      if (!detail.forecast) {
+        void api<{ forecast: MatchForecast }>(`/fixtures/${id}/forecast`)
+          .then(({ forecast }) => {
+            setData((current) =>
+              current?.fixture.id === id ? { ...current, forecast } : current
+            );
+          })
+          .catch(() => undefined);
+      }
       setSelectedMarket((current) =>
         current && detail.markets.some((market) => market.id === current)
           ? current
@@ -152,8 +153,7 @@ export default function MatchPageInner() {
     return (
       <main id="main-content" className="shell match-page match-page-state" aria-busy="true">
         <div className="match-loading">
-          <span /><span /><span />
-          <p>Opening the match centre…</p>
+          <FootballLoader label="Opening the match centre…" />
         </div>
       </main>
     );
@@ -184,7 +184,12 @@ export default function MatchPageInner() {
             <span>{fixture.competition || "World Cup"}</span>
           </div>
           <div>
-            <time dateTime={new Date(fixture.kickoffTs).toISOString()}>{formatKickoff(fixture.kickoffTs)}</time>
+            <time
+              dateTime={new Date(fixture.kickoffTs).toISOString()}
+              suppressHydrationWarning
+            >
+              {formatKickoff(fixture.kickoffTs)}
+            </time>
             {fixture.venue && <span>{fixture.venue}</span>}
           </div>
         </div>
@@ -198,11 +203,25 @@ export default function MatchPageInner() {
               <strong>{fixture.home.name}</strong>
             </div>
           </div>
-          <div className={`match-score${hasScore ? " has-score" : ""}`}>
+          <div
+            key={hasScore ? `${homeScore}-${awayScore}` : "pending"}
+            className={`match-score${hasScore ? " has-score" : ""}`}
+            aria-label={hasScore
+              ? `${fixture.home.name} ${homeScore}, ${fixture.away.name} ${awayScore}`
+              : `${fixture.home.name} versus ${fixture.away.name}`}
+          >
             {hasScore ? (
               <>{homeScore}<span>:</span>{awayScore}</>
             ) : (
-              <><span>VS</span><small>{new Date(fixture.kickoffTs).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })}</small></>
+              <>
+                <span>VS</span>
+                <small suppressHydrationWarning>
+                  {new Date(fixture.kickoffTs).toLocaleTimeString(undefined, {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })}
+                </small>
+              </>
             )}
           </div>
           <div className="match-team match-team-away">
@@ -225,6 +244,8 @@ export default function MatchPageInner() {
 
       <div className="match-layout">
         <div className="match-analysis">
+          <ForecastPanel forecast={data.forecast} fixture={fixture} />
+
           <PredictionChart history={history} labels={chartLabels} />
 
           <div className="match-intelligence-grid">
@@ -310,7 +331,11 @@ export default function MatchPageInner() {
                         >
                           <span>
                             <strong>{outcomeName(outcome, fixture)}</strong>
-                            <small>{outcomePool ? `${outcomePool.toLocaleString()} ${stakeLabel} backing` : "No picks yet"}</small>
+                            <small>
+                              {outcomePool
+                                ? `${number.format(outcomePool)} ${stakeLabel} backing`
+                                : "No picks yet"}
+                            </small>
                           </span>
                           <span>
                             <strong>{market.totalPool > 0 ? `${Math.round((shares[outcome] || 0) * 100)}%` : "—"}</strong>
@@ -370,7 +395,9 @@ export default function MatchPageInner() {
                   </div>
 
                   <div className="bet-rules">
-                    <span>Closes {formatKickoff(fixture.kickoffTs)}</span>
+                    <span suppressHydrationWarning>
+                      Closes {formatKickoff(fixture.kickoffTs)}
+                    </span>
                     <span>{meta.txlineConfigured ? "Result verified at full time" : "Unverified results refund"}</span>
                   </div>
 

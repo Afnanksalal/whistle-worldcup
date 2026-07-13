@@ -101,6 +101,91 @@ export interface InsightEvidence {
   url?: string;
 }
 
+export type ForecastPhase = "pre_match" | "live" | "final";
+export type ForecastConfidenceLevel = "low" | "medium" | "high";
+
+export interface ForecastProbabilities {
+  home: number;
+  draw: number;
+  away: number;
+}
+
+export interface ForecastEvidence {
+  kind:
+    | "fixture_feed"
+    | "competition_history"
+    | "team_form"
+    | "head_to_head"
+    | "player_availability"
+    | "live_score"
+    | "model_prior";
+  label: string;
+  source: string;
+  asOf: number;
+  sampleSize?: number;
+}
+
+export interface ForecastConfidence {
+  level: ForecastConfidenceLevel;
+  /** Evidence-quality score in the inclusive range 0..1; not outcome probability. */
+  score: number;
+  reasons: string[];
+}
+
+export interface ForecastFreshness {
+  generatedAt: number;
+  fixtureFeedAsOf: number | null;
+  evidenceAsOf: number | null;
+  ageSeconds: number | null;
+  status: "fresh" | "aging" | "stale" | "unknown";
+}
+
+export interface MatchModelForecast {
+  version: "whistle-poisson-v1";
+  phase: ForecastPhase;
+  probabilities: ForecastProbabilities;
+  expectedGoals: { home: number; away: number };
+  likelyOutcome: MatchResultOutcome;
+  confidence: ForecastConfidence;
+  evidence: ForecastEvidence[];
+  disclaimer: string;
+}
+
+export interface CrowdPriceSnapshot {
+  /** False when the public 1X2 pool is empty or unavailable. */
+  available: boolean;
+  label: "pool_implied";
+  marketId?: string;
+  totalPoolUnits?: number;
+  probabilities?: ForecastProbabilities;
+  asOf?: number;
+  disclaimer: string;
+}
+
+export interface ForecastNarrative {
+  source: "deterministic" | "groq";
+  text: string;
+  /** Public model identifier only; credentials are never included. */
+  model?: string;
+}
+
+export interface MatchForecast {
+  fixtureId: string;
+  generatedAt: number;
+  expiresAt: number;
+  dataContext: {
+    fixtureSource: "txline" | "thesportsdb";
+    forecastUse: true;
+    settlementUse: "requires_txline_validation" | "not_eligible";
+    disclaimer: string;
+  };
+  model: MatchModelForecast;
+  /** A comparison surface only. This is never an input to `model`. */
+  crowd: CrowdPriceSnapshot;
+  narrative: ForecastNarrative;
+  freshness: ForecastFreshness;
+}
+
 export interface OddsQuote {
   fixtureId: string;
   market: string;

@@ -8,8 +8,10 @@ import { getLogger } from "../observability";
  */
 const TSDB = "https://www.thesportsdb.com/api/v1/json/123";
 
-type TsdbEvent = {
+export type TsdbEvent = {
   idEvent?: string;
+  idHomeTeam?: string;
+  idAwayTeam?: string;
   strEvent?: string;
   strHomeTeam?: string;
   strAwayTeam?: string;
@@ -48,7 +50,7 @@ function kickoffTs(dateEvent?: string, strTime?: string): number {
   return Number.isFinite(ms) ? ms : Date.now() + 3600_000;
 }
 
-function toFixture(ev: TsdbEvent): Fixture | null {
+export function publicEventToFixture(ev: TsdbEvent): Fixture | null {
   if (!ev.idEvent || !ev.strHomeTeam || !ev.strAwayTeam) return null;
   const homeScore =
     ev.intHomeScore != null && ev.intHomeScore !== "" ? Number(ev.intHomeScore) : undefined;
@@ -68,11 +70,13 @@ function toFixture(ev: TsdbEvent): Fixture | null {
     kickoffTs: kickoffTs(ev.dateEvent, ev.strTime),
     status: statusFrom(ev.strStatus, hasScore),
     home: {
+      id: ev.idHomeTeam || undefined,
       name: ev.strHomeTeam,
       shortName: ev.strHomeTeam.slice(0, 3).toUpperCase(),
       logo: ev.strHomeTeamBadge || undefined,
     },
     away: {
+      id: ev.idAwayTeam || undefined,
       name: ev.strAwayTeam,
       shortName: ev.strAwayTeam.slice(0, 3).toUpperCase(),
       logo: ev.strAwayTeamBadge || undefined,
@@ -126,7 +130,7 @@ export async function fetchPublicFixtures(): Promise<Fixture[]> {
       continue;
     }
     for (const ev of batch.value.data.events || []) {
-      const f = toFixture(ev);
+      const f = publicEventToFixture(ev);
       if (f) byId.set(f.id, f);
     }
   }
@@ -141,7 +145,7 @@ export async function fetchPublicFixtures(): Promise<Fixture[]> {
         event?: TsdbEvent[] | null;
       };
       for (const ev of data.event || []) {
-        const f = toFixture(ev);
+        const f = publicEventToFixture(ev);
         if (f) byId.set(f.id, f);
       }
       fixtures = [...byId.values()].filter((fixture) =>

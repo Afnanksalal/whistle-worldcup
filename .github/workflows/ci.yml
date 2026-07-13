@@ -21,22 +21,56 @@ jobs:
         run: npm ci
       - name: Shared build + unit tests
         run: npm run check
-      - name: Web production build
-        run: npm run build -w @whistle/web
+      - name: Web production build and SEO/crawler smoke
         env:
-          NEXT_PUBLIC_API_URL: http://localhost:4000
+          INTERNAL_API_URL: http://127.0.0.1:4010
+          NEXT_PUBLIC_API_URL: http://127.0.0.1:4010
           NEXT_PUBLIC_SITE_URL: https://whistle.example
           NEXT_PUBLIC_SOLANA_RPC: https://api.devnet.solana.com
-      - name: SEO and crawler smoke
+          SEO_BASE_URL: http://127.0.0.1:3000
+          SEO_EXPECTED_ORIGIN: https://whistle.example
+          SEO_FIXTURE_PORT: "4010"
         run: |
-          npm run start -w @whistle/web -- -p 3000 > /tmp/whistle-web.log 2>&1 &
-          WEB_PID=$!
-          trap 'kill $WEB_PID' EXIT
-          for attempt in $(seq 1 30); do
-            if curl -sf http://127.0.0.1:3000/ >/dev/null; then break; fi
+          node apps/web/scripts/seo-smoke-fixture-server.mjs > /tmp/whistle-seo-fixture.log 2>&1 &
+          FIXTURE_PID=$!
+          WEB_PID=""
+          cleanup() {
+            if [ -n "$WEB_PID" ]; then kill "$WEB_PID" 2>/dev/null || true; fi
+            kill "$FIXTURE_PID" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          FIXTURE_READY=false
+          for attempt in $(seq 1 20); do
+            if curl -sf http://127.0.0.1:4010/health >/dev/null; then
+              FIXTURE_READY=true
+              break
+            fi
             sleep 1
           done
-          SEO_BASE_URL=http://127.0.0.1:3000 npm run check:seo
+          if [ "$FIXTURE_READY" != "true" ]; then
+            cat /tmp/whistle-seo-fixture.log
+            exit 1
+          fi
+
+          npm run build -w @whistle/web
+          npm run start -w @whistle/web -- -p 3000 > /tmp/whistle-web.log 2>&1 &
+          WEB_PID=$!
+
+          WEB_READY=false
+          for attempt in $(seq 1 30); do
+            if curl -sf http://127.0.0.1:3000/ >/dev/null; then
+              WEB_READY=true
+              break
+            fi
+            sleep 1
+          done
+          if [ "$WEB_READY" != "true" ]; then
+            cat /tmp/whistle-web.log
+            exit 1
+          fi
+
+          npm run check:seo
 
   rust:
     name: Anchor program check

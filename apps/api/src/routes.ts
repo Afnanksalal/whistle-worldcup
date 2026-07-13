@@ -28,6 +28,7 @@ import { getFixtureSource } from "./txline/ingest";
 import { priceHistoryForFixture } from "./markets/prices";
 import { getMatchStats, refreshMatchStats } from "./match/stats";
 import { buildInsights, getInsights } from "./insights";
+import { getCachedMatchForecast, getMatchForecast } from "./forecast";
 
 declare global {
   namespace Express {
@@ -127,11 +128,16 @@ export function createRouter(cfg: AppConfig) {
 
     // Refresh stats/insights in the background if stale (>45s)
     const statsAge = getMatchStats(fixture.id)?.updatedAt || 0;
-    if (Date.now() - statsAge > 45_000) {
+    if (
+      (fixture.status === "live" || fixture.status === "finished") &&
+      Date.now() - statsAge > 45_000
+    ) {
       void refreshMatchStats(fixture.id)
         .then(() => buildInsights(fixture.id))
         .catch(() => undefined);
     }
+    const forecast = getCachedMatchForecast(fixture.id);
+    if (!forecast) void getMatchForecast(fixture.id).catch(() => undefined);
 
     res.json({
       fixture: publicFixture(fixture),
@@ -141,6 +147,7 @@ export function createRouter(cfg: AppConfig) {
       priceHistory: priceHistoryForFixture(fixture.id),
       stats: getMatchStats(fixture.id),
       insights: getInsights(fixture.id),
+      forecast,
       meta: publicMeta(cfg, getFixtureSource()),
     });
   });
@@ -151,6 +158,21 @@ export function createRouter(cfg: AppConfig) {
       res.json({ insights: cards });
     } catch (e) {
       res.status(500).json({ error: String(e) });
+    }
+  });
+
+  router.get("/fixtures/:id/forecast", async (req, res) => {
+    try {
+      const forecast = await getMatchForecast(req.params.id);
+      if (!forecast) return res.status(404).json({ error: "fixture not found" });
+      const maxAge = forecast.model.phase === "live" ? 15 : 60;
+      res.setHeader(
+        "Cache-Control",
+        `public, max-age=${maxAge}, stale-while-revalidate=${maxAge * 4}`
+      );
+      res.json({ forecast });
+    } catch {
+      res.status(503).json({ error: "forecast temporarily unavailable" });
     }
   });
 

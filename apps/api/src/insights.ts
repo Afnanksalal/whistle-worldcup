@@ -457,7 +457,7 @@ function evidenceFingerprint(fixture: Fixture, cards: InsightCard[]): string {
           })),
         models: {
           openai: process.env.OPENAI_MODEL || "gpt-5.6-luna",
-          groq: process.env.GROQ_MODEL || "llama-3.1-8b-instant",
+          groq: process.env.GROQ_MODEL || "openai/gpt-oss-20b",
           gemini: process.env.GEMINI_MODEL || "gemini-1.5-flash",
         },
       })
@@ -563,17 +563,19 @@ async function requestOpenAI(prompt: string): Promise<LlmResult> {
 }
 
 async function requestGroq(prompt: string): Promise<LlmResult> {
+  const model = process.env.GROQ_MODEL || "openai/gpt-oss-20b";
   const data = (await postJson(
     "https://api.groq.com/openai/v1/chat/completions",
     { Authorization: `Bearer ${process.env.GROQ_API_KEY}` },
     {
-      model: process.env.GROQ_MODEL || "llama-3.1-8b-instant",
+      model,
       messages: [
         { role: "system", content: GROUNDED_INSTRUCTIONS },
         { role: "user", content: prompt },
       ],
       temperature: 0.2,
-      max_tokens: AI_MAX_OUTPUT_TOKENS,
+      max_completion_tokens: AI_MAX_OUTPUT_TOKENS,
+      ...(model.startsWith("openai/gpt-oss") ? { reasoning_effort: "low" } : {}),
     }
   )) as { choices?: Array<{ message?: { content?: string } }> };
   return {

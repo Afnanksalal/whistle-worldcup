@@ -1,0 +1,461 @@
+.panel {
+  --forecast-grid: rgba(23, 63, 51, 0.11);
+  position: relative;
+  overflow: hidden;
+  padding: clamp(1.1rem, 2.5vw, 1.65rem);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.74), rgba(255, 255, 255, 0) 44%),
+    var(--paper);
+  box-shadow: var(--shadow-sm);
+  isolation: isolate;
+}
+
+.panel::before {
+  position: absolute;
+  z-index: -1;
+  top: -8rem;
+  right: -8rem;
+  width: 19rem;
+  height: 19rem;
+  border: 1px solid rgba(23, 63, 51, 0.07);
+  border-radius: 50%;
+  content: "";
+}
+
+.panel :global(.forecast-header) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.15rem;
+}
+
+.panel :global(.forecast-header h2) {
+  margin: 0.08rem 0 0;
+  font-size: clamp(1.55rem, 3vw, 2.15rem);
+  line-height: 1;
+}
+
+.panel :global(.forecast-provider) {
+  display: inline-flex;
+  min-height: 1.8rem;
+  align-items: center;
+  padding: 0.35rem 0.58rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted-strong);
+  background: rgba(255, 255, 255, 0.62);
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 0.61rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.panel :global(.forecast-provider.is-groq) {
+  border-color: rgba(183, 148, 82, 0.42);
+  color: #725722;
+  background: var(--brass-soft);
+}
+
+.panel :global(.forecast-lead) {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) minmax(9rem, 0.65fr);
+  gap: 1px;
+  overflow: hidden;
+  margin-bottom: 0.8rem;
+  border-radius: var(--radius);
+  color: var(--paper);
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+.panel :global(.forecast-lead > div) {
+  display: grid;
+  min-height: 8rem;
+  align-content: center;
+  padding: clamp(1rem, 3vw, 1.5rem);
+  background: var(--forest-deep);
+}
+
+.panel :global(.forecast-lead span),
+.panel :global(.forecast-lead small) {
+  color: rgba(251, 252, 248, 0.67);
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.panel :global(.forecast-lead strong) {
+  display: block;
+  max-width: 13ch;
+  margin: 0.2rem 0;
+  color: var(--paper);
+  font-family: var(--font-display), "Arial Narrow", sans-serif;
+  font-size: clamp(2rem, 5vw, 3.45rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 0.92;
+}
+
+.panel :global(.forecast-xg) {
+  background: var(--forest) !important;
+}
+
+.panel :global(.forecast-xg strong) {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: clamp(1.45rem, 3vw, 2rem);
+  font-weight: 600;
+  letter-spacing: -0.045em;
+}
+
+.panel :global(.forecast-xg strong i) {
+  color: var(--brass);
+  font-style: normal;
+}
+
+.panel :global(.forecast-probabilities) {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+}
+
+.panel :global(.forecast-probabilities > div) {
+  position: relative;
+  overflow: hidden;
+  min-width: 0;
+  padding: 0.72rem 0.75rem 0.85rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.46);
+}
+
+.panel :global(.forecast-probabilities > div.is-likely) {
+  border-color: rgba(23, 63, 51, 0.46);
+  background: var(--forest-soft);
+}
+
+.panel :global(.forecast-probabilities span) {
+  display: block;
+  overflow: hidden;
+  color: var(--muted-strong);
+  font-size: 0.68rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel :global(.forecast-probabilities strong) {
+  display: block;
+  margin: 0.16rem 0 0.55rem;
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 1.15rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.panel :global(.forecast-probabilities > div > i) {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 0.2rem;
+  background: var(--line);
+}
+
+.panel :global(.forecast-probabilities > div > i::after) {
+  display: block;
+  width: var(--forecast-width);
+  height: 100%;
+  background: var(--forest);
+  content: "";
+  transform-origin: left;
+  animation: forecast-bar-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.panel :global(.forecast-chart-block) {
+  padding: 0.9rem 0.9rem 0.35rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.44);
+}
+
+.panel :global(.forecast-chart-heading) {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.4rem;
+}
+
+.panel :global(.forecast-chart-heading strong),
+.panel :global(.forecast-chart-heading span) {
+  display: block;
+}
+
+.panel :global(.forecast-chart-heading strong) {
+  font-size: 0.82rem;
+}
+
+.panel :global(.forecast-chart-heading > div:first-child > span) {
+  color: var(--muted);
+  font-size: 0.67rem;
+}
+
+.panel :global(.forecast-chart-key) {
+  display: flex;
+  gap: 0.65rem;
+  color: var(--muted-strong);
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 0.58rem;
+}
+
+.panel :global(.forecast-chart-key span) {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+}
+
+.panel :global(.forecast-chart-key i) {
+  width: 0.48rem;
+  height: 0.48rem;
+  border-radius: 0.12rem;
+  background: var(--forest);
+}
+
+.panel :global(.forecast-chart-key i.is-crowd) {
+  background: var(--brass);
+}
+
+.panel :global(.forecast-chart) {
+  width: 100%;
+  height: 13.5rem;
+}
+
+.panel :global(.forecast-crowd-empty) {
+  margin: -0.3rem 0 0.35rem 4.6rem;
+  color: var(--muted);
+  font-size: 0.65rem;
+}
+
+.panel :global(.forecast-notebook) {
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(14rem, 0.65fr);
+  gap: 0.75rem;
+  margin-top: 0.75rem;
+}
+
+.panel :global(.forecast-narrative),
+.panel :global(.forecast-confidence) {
+  min-width: 0;
+  padding: 0.9rem;
+  border-radius: var(--radius);
+}
+
+.panel :global(.forecast-narrative) {
+  display: grid;
+  grid-template-columns: 4.5rem minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  overflow: hidden;
+  border: 1px solid rgba(183, 148, 82, 0.32);
+  background: var(--brass-soft);
+}
+
+.panel :global(.forecast-mascot) {
+  width: 4.8rem;
+  height: 4.8rem;
+  object-fit: contain;
+  transform: translateY(0.35rem) scale(1.16);
+  filter: saturate(0.86) contrast(0.97);
+}
+
+.panel :global(.forecast-narrative span),
+.panel :global(.forecast-confidence span) {
+  color: var(--muted-strong);
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 0.59rem;
+  font-weight: 600;
+  letter-spacing: 0.035em;
+  text-transform: uppercase;
+}
+
+.panel :global(.forecast-narrative p) {
+  margin: 0.25rem 0 0;
+  font-size: 0.79rem;
+  line-height: 1.48;
+}
+
+.panel :global(.forecast-confidence) {
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.44);
+}
+
+.panel :global(.forecast-confidence > div) {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.65rem;
+}
+
+.panel :global(.forecast-confidence strong) {
+  color: var(--muted-strong);
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 0.6rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.panel :global(.forecast-confidence > i) {
+  display: block;
+  height: 0.28rem;
+  margin: 0.55rem 0 0.62rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line);
+}
+
+.panel :global(.forecast-confidence > i span) {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--forest);
+}
+
+.panel :global(.forecast-confidence ul) {
+  display: grid;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  color: var(--muted-strong);
+  font-size: 0.67rem;
+  list-style: none;
+}
+
+.panel :global(.forecast-confidence li) {
+  padding-left: 0.75rem;
+}
+
+.panel :global(.forecast-confidence li::before) {
+  position: absolute;
+  margin-left: -0.7rem;
+  color: var(--brass);
+  content: "•";
+}
+
+.panel :global(.forecast-footer) {
+  margin-top: 0.8rem;
+}
+
+.panel :global(.forecast-evidence) {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.panel :global(.forecast-evidence span) {
+  padding: 0.28rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: var(--muted-strong);
+  background: rgba(255, 255, 255, 0.45);
+  font-family: var(--font-data), ui-monospace, monospace;
+  font-size: 0.55rem;
+}
+
+.panel :global(.forecast-footer > p) {
+  max-width: 78ch;
+  margin: 0.55rem 0 0;
+  color: var(--muted);
+  font-size: 0.64rem;
+  line-height: 1.5;
+}
+
+.empty {
+  display: flex;
+  min-height: 9rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.empty h2 {
+  margin: 0.1rem 0 0;
+}
+
+.empty > p {
+  max-width: 34rem;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+
+@keyframes forecast-bar-in {
+  from { transform: scaleX(0); }
+  to { transform: scaleX(1); }
+}
+
+@media (max-width: 760px) {
+  .panel :global(.forecast-lead),
+  .panel :global(.forecast-notebook) {
+    grid-template-columns: 1fr;
+  }
+
+  .panel :global(.forecast-lead > div) {
+    min-height: 6.5rem;
+  }
+
+  .panel :global(.forecast-probabilities) {
+    gap: 0.38rem;
+  }
+
+  .panel :global(.forecast-probabilities > div) {
+    padding-inline: 0.55rem;
+  }
+
+  .panel :global(.forecast-chart-heading) {
+    display: grid;
+  }
+
+  .panel :global(.forecast-chart) {
+    height: 12.5rem;
+  }
+
+  .empty {
+    display: grid;
+  }
+}
+
+@media (max-width: 430px) {
+  .panel {
+    padding: 0.9rem;
+  }
+
+  .panel :global(.forecast-header) {
+    align-items: flex-end;
+  }
+
+  .panel :global(.forecast-probabilities strong) {
+    font-size: 1rem;
+  }
+
+  .panel :global(.forecast-narrative) {
+    grid-template-columns: 3.75rem minmax(0, 1fr);
+  }
+
+  .panel :global(.forecast-mascot) {
+    width: 4rem;
+    height: 4rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .panel :global(.forecast-probabilities > div > i::after) {
+    animation: none;
+  }
+}

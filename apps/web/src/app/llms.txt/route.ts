@@ -25,7 +25,9 @@ Whistle offers parimutuel prediction pools. Participants choose a match result o
 - A public TheSportsDB schedule fallback can keep fixtures visible, but fallback scores do not verify settlement.
 - Pools settle only from a canonical TxLINE final record that passes validation. If that record is unavailable, the safe outcome is to keep the pool pending or void and refund it.
 - Match news comes from attributed public RSS publishers. Whistle links to the source and does not claim authorship.
-- AI-assisted notes summarize available match, pool, odds, statistics, and news evidence. They are informational and can be incomplete or wrong.
+- Match pages include a deterministic home/draw/away forecast with expected goals, evidence quality, freshness, and explicit coverage gaps. Fan-pool shares are displayed separately and never change the model.
+- Groq, when configured, explains only supplied forecast evidence. It cannot set the probabilities, invent player availability, recommend a pick, or settle a pool.
+- Forecasts and AI-assisted notes are informational, uncertain, and can be incomplete or wrong.
 
 ## Source and technical detail
 

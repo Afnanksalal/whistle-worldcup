@@ -25,6 +25,8 @@ Wallet-specific picks, the operations console, and private squad-detail URLs are
 
 ## Public machine-readable endpoints
 
+- ${absoluteUrl("/api/fixtures")}/{fixture-id}/forecast — evidence-labelled model forecast for one match; replace {fixture-id} with a public fixture ID.
+
 - ${absoluteUrl("/api/fixtures")} — fixture list with data-source metadata.
 - ${absoluteUrl("/api/groups")} — computed group context.
 - ${absoluteUrl("/api/markets")} — public pool state.
@@ -39,9 +41,11 @@ TxLINE is the primary schedule, live-data, and result source. When the configure
 
 Shared match-result and goals-line resolution logic lives in @whistle/shared so the API keeper and on-chain program can remain aligned. User-facing states are Open, Locked, Settled, Paid, and Refund rather than implementation-specific proof terminology.
 
-## News and AI
+## Forecasts, news, and AI
 
-The news desk uses public RSS article metadata from established publishers and links readers to the original article. Whistle does not republish or claim authorship of the full articles. AI-assisted desk notes are generated only from available match, pool, price, statistics, event, table, and news evidence. They are informational signals, not predictions, financial advice, guarantees, or verified probabilities.
+Whistle's numeric match forecast is produced by a deterministic, smoothed Poisson model using normalized completed fixture history, recent team form, genuinely available head-to-head records, and an observed live score/minute when supplied. It reports home/draw/away probabilities, expected goals, evidence quality, freshness, and explicit gaps. Player availability is excluded when the configured provider does not publish it. The funded fan-pool split is shown separately and is never an input to the model. Neither forecast nor fallback sports data can settle a pool.
+
+When Groq is configured, it may rewrite only the short evidence explanation using the facts already supplied by Whistle. It cannot set probabilities, invent player status, recommend a pick, or settle a pool. Provider failure retains the deterministic explanation. The news desk uses public RSS article metadata from established publishers and links readers to the original article; Whistle does not republish or claim authorship of the full articles.
 
 ## Wallet and privacy boundaries
 

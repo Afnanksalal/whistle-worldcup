@@ -1,18 +1,25 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Fixture, MarketPool } from "@whistle/shared";
 import { impliedShares } from "@whistle/shared";
 import { api, formatKickoff, statusLabel, wsUrl } from "../lib/api";
 import { useRuntime, type AppMeta } from "../lib/runtime";
+import { FootballLoader } from "./FootballLoader";
 import { TeamCrest, teamShortCode } from "./TeamCrest";
 
 type FixturesRes = { fixtures: Fixture[]; meta?: AppMeta };
 type MarketsRes = { markets: MarketPool[] };
 type BoardFilter = "next" | "live" | "results";
 
-const number = new Intl.NumberFormat(undefined, { maximumFractionDigits: 0 });
+type FixtureBoardProps = {
+  initialFixtures?: Fixture[];
+  initialMarkets?: MarketPool[];
+};
+
+const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
 function countdown(ts: number, now: number) {
   const diff = ts - now;
@@ -26,9 +33,18 @@ function countdown(ts: number, now: number) {
   return `${Math.max(1, mins)}m`;
 }
 
-function dayLabel(ts: number) {
+function dayLabel(ts: number, now: number | null) {
   const match = new Date(ts);
-  const today = new Date();
+  if (now === null) {
+    return match.toLocaleDateString("en", {
+      weekday: "long",
+      month: "short",
+      day: "numeric",
+      timeZone: "UTC",
+    });
+  }
+
+  const today = new Date(now);
   const tomorrow = new Date(today);
   tomorrow.setDate(today.getDate() + 1);
   const key = match.toDateString();
@@ -47,13 +63,16 @@ function matchStatusClass(status: Fixture["status"]) {
   return "";
 }
 
-export function FixtureBoard() {
+export function FixtureBoard({
+  initialFixtures = [],
+  initialMarkets = [],
+}: FixtureBoardProps) {
   const { meta, stakeLabel } = useRuntime();
-  const [fixtures, setFixtures] = useState<Fixture[]>([]);
-  const [markets, setMarkets] = useState<MarketPool[]>([]);
+  const [fixtures, setFixtures] = useState<Fixture[]>(initialFixtures);
+  const [markets, setMarkets] = useState<MarketPool[]>(initialMarkets);
   const [filter, setFilter] = useState<BoardFilter>("next");
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(initialFixtures.length === 0);
   const [now, setNow] = useState<number | null>(null);
   const refreshQueued = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -76,7 +95,7 @@ export function FixtureBoard() {
 
   useEffect(() => {
     setNow(Date.now());
-    void load(true);
+    void load(initialFixtures.length === 0);
     const poll = setInterval(() => void load(), 20_000);
     const clock = setInterval(() => setNow(Date.now()), 30_000);
     let socket: WebSocket | null = null;
@@ -100,7 +119,7 @@ export function FixtureBoard() {
       if (refreshQueued.current) clearTimeout(refreshQueued.current);
       socket?.close();
     };
-  }, [load]);
+  }, [initialFixtures.length, load]);
 
   const ordered = useMemo(
     () => [...fixtures].sort((a, b) => a.kickoffTs - b.kickoffTs),
@@ -130,11 +149,11 @@ export function FixtureBoard() {
   const grouped = useMemo(() => {
     const map = new Map<string, Fixture[]>();
     for (const fixture of shown) {
-      const label = dayLabel(fixture.kickoffTs);
+      const label = dayLabel(fixture.kickoffTs, now);
       map.set(label, [...(map.get(label) || []), fixture]);
     }
     return [...map.entries()];
-  }, [shown]);
+  }, [now, shown]);
 
   const featuredMarkets = featured ? marketsFor(featured.id) : [];
   const featuredResult = featuredMarkets.find((market) => market.marketType === "match_result");
@@ -207,7 +226,10 @@ export function FixtureBoard() {
                   {featured.status === "scheduled" ? (
                     <>
                       <strong>Next kickoff</strong>
-                      <time dateTime={new Date(featured.kickoffTs).toISOString()}>
+                      <time
+                        dateTime={new Date(featured.kickoffTs).toISOString()}
+                        suppressHydrationWarning
+                      >
                         {formatKickoff(featured.kickoffTs)}
                       </time>
                     </>
@@ -221,7 +243,13 @@ export function FixtureBoard() {
                     <TeamCrest team={featured.home} variant="featured" />
                     <span>{featured.home.name}</span>
                   </div>
-                  <div className="featured-score" aria-label="score">
+                  <div
+                    key={featured.score ? `${featured.score.home}-${featured.score.away}` : "pending"}
+                    className="featured-score"
+                    aria-label={featured.score
+                      ? `${featured.home.name} ${featured.score.home}, ${featured.away.name} ${featured.score.away}`
+                      : `${featured.home.name} versus ${featured.away.name}`}
+                  >
                     {featured.score ? (
                       <>
                         {featured.score.home}<span>:</span>{featured.score.away}
@@ -283,7 +311,21 @@ export function FixtureBoard() {
             ) : (
               <div className="featured-match featured-empty">
                 <p className="section-kicker">Match feed</p>
-                <h2>{loading ? "Loading the tournament…" : "The next kickoff is being confirmed."}</h2>
+                {loading ? (
+                  <FootballLoader label="Loading the tournament…" inverse />
+                ) : (
+                  <>
+                    <h2>The next kickoff is being confirmed.</h2>
+                    <Image
+                      className="featured-empty-mascot"
+                      src="/brand/pip-mascot.png"
+                      alt=""
+                      width={1280}
+                      height={1280}
+                      aria-hidden="true"
+                    />
+                  </>
+                )}
               </div>
             )}
           </div>
@@ -352,12 +394,15 @@ export function FixtureBoard() {
         )}
 
         {loading && !fixtures.length && (
-          <div className="fixture-skeletons" aria-label="Loading matches">
-            {[0, 1, 2].map((item) => <span key={item} />)}
+          <div className="fixture-loading">
+            <FootballLoader label="Loading matches…" compact />
+            <div className="fixture-skeletons" aria-hidden="true">
+              {[0, 1, 2].map((item) => <span key={item} />)}
+            </div>
           </div>
         )}
 
-        {!loading && !error && grouped.map(([day, dayFixtures]) => (
+        {((!loading && !error) || fixtures.length > 0) && grouped.map(([day, dayFixtures]) => (
           <div className="fixture-day" key={day}>
             <div className="fixture-day-label">
               <span>{day}</span>
@@ -377,7 +422,10 @@ export function FixtureBoard() {
                       <span className={`status-badge${matchStatusClass(fixture.status)}`}>
                         {statusLabel(fixture.status)}
                       </span>
-                      <time dateTime={new Date(fixture.kickoffTs).toISOString()}>
+                      <time
+                        dateTime={new Date(fixture.kickoffTs).toISOString()}
+                        suppressHydrationWarning
+                      >
                         {new Date(fixture.kickoffTs).toLocaleTimeString(undefined, {
                           hour: "2-digit",
                           minute: "2-digit",

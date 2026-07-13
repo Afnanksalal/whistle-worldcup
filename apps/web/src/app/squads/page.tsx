@@ -7,6 +7,7 @@ import type { Squad } from "@whistle/shared";
 import { api } from "../../lib/api";
 import { useIdentity } from "../../lib/identity";
 import { BrandMark } from "../../components/BrandMark";
+import { FootballLoader } from "../../components/FootballLoader";
 
 type SquadSummary = Pick<Squad, "id" | "name" | "createdAt"> & {
   memberCount: number;
@@ -184,7 +185,9 @@ export default function SquadsPage() {
           </div>
 
           {loading ? (
-            <div className="squads-loading">Opening the clubhouse…</div>
+            <div className="squads-loading">
+              <FootballLoader label="Opening the clubhouse…" />
+            </div>
           ) : squads.length ? (
             <div className="squad-list">
               {squads.map((squad) => (

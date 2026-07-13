@@ -8,6 +8,7 @@ import { api, formatKickoff, shortAddr } from "../../../lib/api";
 import { useIdentity } from "../../../lib/identity";
 import { useRuntime } from "../../../lib/runtime";
 import { BrandMark } from "../../../components/BrandMark";
+import { FootballLoader } from "../../../components/FootballLoader";
 
 type Leader = { owner: string; staked: number; won: number; pnl: number };
 type Notice = { tone: "success" | "error"; text: string };
@@ -105,9 +106,15 @@ export default function SquadDetailPage() {
   if (!squad) {
     return (
       <main id="main-content" className="squads-page">
-        <div className="shell squad-detail-loading" role={notice?.tone === "error" ? "alert" : "status"}>
-          <BrandMark className="empty-brand-mark" accessibleLabel={null} />
-          <p>{notice?.text || "Opening the squad room…"}</p>
+        <div className="shell squad-detail-loading" role={notice?.tone === "error" ? "alert" : undefined}>
+          {notice?.tone === "error" ? (
+            <>
+              <BrandMark className="empty-brand-mark" accessibleLabel={null} />
+              <p>{notice.text}</p>
+            </>
+          ) : (
+            <FootballLoader label="Opening the squad room…" />
+          )}
           {notice?.tone === "error" && <Link href="/squads" className="text-link">Back to squads <span>→</span></Link>}
         </div>
       </main>
