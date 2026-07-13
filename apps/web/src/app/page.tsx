@@ -1,10 +1,18 @@
 import Link from "next/link";
 import { FixtureBoard } from "../components/FixtureBoard";
+import { getHomeInitialData } from "../lib/seo-data";
 
-export default function HomePage() {
+export const dynamic = "force-dynamic";
+
+export default async function HomePage() {
+  const initialData = await getHomeInitialData();
+
   return (
     <main id="main-content">
-      <FixtureBoard />
+      <FixtureBoard
+        initialFixtures={initialData?.fixtures ?? []}
+        initialMarkets={initialData?.markets ?? []}
+      />
 
       <section className="pool-explainer" aria-labelledby="pool-title">
         <div className="shell pool-explainer-grid">

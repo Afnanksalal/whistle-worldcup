@@ -6,6 +6,7 @@ Whistle is a fan-facing World Cup prediction product: public and squad parimutue
 
 ## Highlights
 
+- **Match forecast** -- deterministic team-form/Poisson probabilities with confidence, freshness, evidence gaps, and a separate crowd-price snapshot
 - **Parimutuel, not AMM** — stakes form outcome pools; implied odds = pool shares
 - **Live data board** — TxLINE primary; TheSportsDB free public schedule as fallback
 - **Keeper settlement** — only a canonical TxLINE final record with a sequence and non-empty validation payload may settle a market
@@ -37,6 +38,8 @@ Browser → Next.js (VPS) → Caddy → Whistle API
 | `INTERNAL_API_URL` | Web-to-API container URL used for server-rendered match metadata and sitemap fixtures |
 | `DEMO_MODE` / `ALLOW_SANDBOX` | **Forbidden** — process exits |
 | Node.js | `>=22.12`; production images use Node 22 |
+| `GROQ_API_KEY` | Optional, server-only forecast/insight narrative enrichment; deterministic output remains available without it |
+| `GROQ_MODEL` | Optional; defaults to `openai/gpt-oss-20b` with low reasoning effort and strict forecast-note JSON |
 | `SETTLEMENT_RAIL` / `STAKE_ASSET` | Must remain `ledger` / `units`; unsupported real-value settings fail boot |
 
 ## TxLINE endpoints (when live)
@@ -59,10 +62,49 @@ Networks: **devnet** `https://txline-dev.txodds.com` or **mainnet** free tiers.
 | Endpoint | Notes |
 |----------|-------|
 | `GET /api/health` `/ready` `/live` `/metrics` | Health + Prometheus |
+| `GET /api/fixtures/:id/forecast` | Deterministic 1X2 probabilities, evidence/confidence/freshness, optional Groq note, and separate pool-implied crowd snapshot |
 | `GET /api/fixtures` `/groups` `/news` `/meta` | Product data |
 | `GET /api/admin/overview` | Admin key required |
 | `POST /api/markets/:id/settle\|void\|lock` | Admin key required |
 | `POST /api/markets/:id/deposit` | Wallet identity |
+
+## Forecast boundary
+
+`GET /api/fixtures/:id/forecast` uses only normalized fixture/result history,
+team identity, and an observed live score/minute when those fields genuinely
+exist. A smoothed Poisson model produces home/draw/away probabilities that are
+normalized to exactly one. Sparse samples stay low-confidence and expose their
+neutral-prior, head-to-head, player-availability, and feed-freshness gaps.
+
+The response deliberately has separate `model` and `crowd` objects. Funded
+parimutuel pool shares are never an input to the deterministic forecast. Groq,
+when `GROQ_API_KEY` is configured, may replace only the short explanatory note
+using a strict JSON response; it cannot alter probabilities, evidence, or
+confidence. Provider failures and timeouts retain the deterministic note.
+
+Forecasts have no settlement authority. TxLINE data still needs a canonical
+final record plus validation payload before settlement, while TheSportsDB
+fallback history may inform a forecast but is always marked `not_eligible` for
+settlement. In-memory forecasts are fingerprinted, single-flight cached for five
+minutes (30 seconds live), and capped at 256 entries. Optional tuning:
+`FORECAST_CACHE_TTL_MS`, `FORECAST_LIVE_CACHE_TTL_MS`, and
+`FORECAST_AI_TIMEOUT_MS`.
+
+When the active fixture source is the public fallback, a match forecast also
+requests each team's recent result feed and a focused head-to-head search on
+demand. Those results may span other competitions and inform team form and
+past-meeting evidence, while the scoring baseline remains limited to the target
+competition. The adapter is single-flight,
+cached for six hours, bounded, timeout-protected, and held to at most six calls
+per minute. Tune downward with `FORECAST_HISTORY_REQUESTS_PER_MIN` or adjust
+`FORECAST_HISTORY_TIMEOUT_MS`. The free feed does not publish a trustworthy
+injury/availability contract, so that limitation remains visible instead of
+being guessed.
+
+TheSportsDB match-stat calls use a process-wide request budget (18/minute by
+default, hard-capped below the provider's 30/minute free limit), timeouts, and
+status-aware caches. Tune with `TSDB_STATS_REQUESTS_PER_MIN` and
+`TSDB_STATS_TIMEOUT_MS` without exceeding the provider plan.
 
 ## Search, social, and agent discovery
 

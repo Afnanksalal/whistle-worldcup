@@ -8,6 +8,7 @@ import { api, shortAddr } from "../../lib/api";
 import { useIdentity } from "../../lib/identity";
 import { useRuntime } from "../../lib/runtime";
 import { BrandMark } from "../../components/BrandMark";
+import { FootballLoader } from "../../components/FootballLoader";
 
 type PosRow = Position & { market?: MarketPool; fixture?: Fixture };
 type View = "active" | "ready" | "history";
@@ -187,7 +188,11 @@ export default function PositionsPage() {
               </div>
             </div>
 
-            {loading && !positions.length && <div className="positions-loading">Refreshing your picks…</div>}
+            {loading && !positions.length && (
+              <div className="positions-loading">
+                <FootballLoader label="Refreshing your picks…" compact />
+              </div>
+            )}
 
             <div className="position-list">
               {shown.map((position) => {

@@ -1,13 +1,14 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
+import { notFound } from "next/navigation";
 import { JsonLd } from "../../../components/JsonLd";
 import { createPageMetadata } from "../../../lib/metadata";
-import { getFixtureForSeo } from "../../../lib/seo-data";
+import { getFixtureForSeo, getMatchDetailForSeo } from "../../../lib/seo-data";
 import { absoluteUrl } from "../../../lib/site";
 import MatchPageInner from "./MatchInner";
 
 type MatchPageProps = {
   params: Promise<{ id: string }>;
+  searchParams?: Promise<{ squad?: string | string[] }>;
 };
 
 const eventStatus: Record<string, string> = {
@@ -35,63 +36,61 @@ export async function generateMetadata({ params }: MatchPageProps): Promise<Meta
   const competition = fixture.competition || "World Cup 2026";
   return createPageMetadata({
     title: `${matchup} — match pool, kickoff and live score`,
-    description: `Follow ${matchup} in ${competition}: kickoff, match status, parimutuel pool movement, and the final result.`,
+    description: `Follow ${matchup} in ${competition}: kickoff, model forecast, expected goals, parimutuel pool movement, live status, and the final result.`,
     path: `/match/${encodeURIComponent(fixture.id)}`,
   });
 }
 
-export default async function MatchPage({ params }: MatchPageProps) {
+export default async function MatchPage({ params, searchParams }: MatchPageProps) {
   const { id } = await params;
-  const fixture = await getFixtureForSeo(id);
+  const requestedSquad = (await searchParams)?.squad;
+  const squadId = Array.isArray(requestedSquad) ? requestedSquad[0] : requestedSquad;
+  const initialDetail = squadId
+    ? await getMatchDetailForSeo(id, squadId)
+    : await getMatchDetailForSeo(id);
 
-  const structuredData = fixture
-    ? {
-        "@context": "https://schema.org",
-        "@type": "SportsEvent",
-        name: `${fixture.home.name} vs ${fixture.away.name}`,
-        description: `${fixture.competition || "World Cup 2026"} football match and Whistle prediction pool.`,
-        url: absoluteUrl(`/match/${encodeURIComponent(fixture.id)}`),
-        mainEntityOfPage: absoluteUrl(`/match/${encodeURIComponent(fixture.id)}`),
-        sport: "Football",
-        startDate: new Date(fixture.kickoffTs).toISOString(),
-        eventStatus: eventStatus[fixture.status] || "https://schema.org/EventScheduled",
-        homeTeam: {
-          "@type": "SportsTeam",
-          name: fixture.home.name,
-          ...(fixture.home.logo?.startsWith("https://") ? { logo: fixture.home.logo } : {}),
-        },
-        awayTeam: {
-          "@type": "SportsTeam",
-          name: fixture.away.name,
-          ...(fixture.away.logo?.startsWith("https://") ? { logo: fixture.away.logo } : {}),
-        },
-        ...(fixture.venue
-          ? {
-              location: {
-                "@type": "Place",
-                name: fixture.venue,
-              },
-            }
-          : {}),
-      }
-    : null;
+  if (!initialDetail) notFound();
+
+  const { fixture } = initialDetail;
+  const structuredData = {
+    "@context": "https://schema.org",
+    "@type": "SportsEvent",
+    name: `${fixture.home.name} vs ${fixture.away.name}`,
+    description: `${fixture.competition || "World Cup 2026"} football match and Whistle prediction pool.`,
+    url: absoluteUrl(`/match/${encodeURIComponent(fixture.id)}`),
+    mainEntityOfPage: absoluteUrl(`/match/${encodeURIComponent(fixture.id)}`),
+    sport: "Football",
+    startDate: new Date(fixture.kickoffTs).toISOString(),
+    eventStatus: eventStatus[fixture.status] || "https://schema.org/EventScheduled",
+    homeTeam: {
+      "@type": "SportsTeam",
+      name: fixture.home.name,
+      ...(fixture.home.logo?.startsWith("https://") ? { logo: fixture.home.logo } : {}),
+    },
+    awayTeam: {
+      "@type": "SportsTeam",
+      name: fixture.away.name,
+      ...(fixture.away.logo?.startsWith("https://") ? { logo: fixture.away.logo } : {}),
+    },
+    ...(fixture.venue
+      ? {
+          location: {
+            "@type": "Place",
+            name: fixture.venue,
+          },
+        }
+      : {}),
+  };
 
   return (
     <>
-      {structuredData ? <JsonLd data={structuredData} /> : null}
-      <Suspense
-        fallback={
-          <main
-            id="main-content"
-            className="shell"
-            style={{ padding: "3rem 0", color: "var(--muted)" }}
-          >
-            Syncing market…
-          </main>
-        }
-      >
-        <MatchPageInner />
-      </Suspense>
+      <JsonLd data={structuredData} />
+      <MatchPageInner
+        key={`${id}:${squadId || "public"}`}
+        fixtureId={id}
+        squadId={squadId}
+        initialDetail={initialDetail}
+      />
     </>
   );
 }

@@ -18,6 +18,9 @@ ADMIN_API_KEY=...             # ≥16 chars — settle/void/admin console
 NEXT_PUBLIC_SITE_URL=https://your-public-origin.example # canonical/OG/sitemap origin
 API_CORS_ORIGIN=same-origin   # behind Caddy; or explicit https://your.host
 NEWS_API_KEY=...              # optional; RSS fallback if unset
+GROQ_API_KEY=...              # optional; grounded forecast/insight wording only
+GROQ_MODEL=openai/gpt-oss-20b
+# FORECAST_HISTORY_REQUESTS_PER_MIN=6 # optional; public team-form budget
 WHISTLE_PROGRAM_ID=...        # optional until Anchor deploy
 REQUIRE_WALLET_AUTH=true
 ```

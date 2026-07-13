@@ -67,9 +67,11 @@ export default function PrivacyPage() {
             <h3>Sports, news, and generated content</h3>
             <p>
               Whistle processes match schedules and results, pool activity,
-              reference odds, and public RSS article data. AI-assisted summaries
-              may use match, pool, odds, and public-news signals. They are not
-              intended to use a participant’s wallet identity as an input.
+              reference odds, and public RSS article data. Deterministic match
+              forecasts may use normalized fixture and score history, team form,
+              and live match state. Optional AI-assisted wording may use only the
+              evidence supplied for that match. Neither process is intended to
+              use a participant’s wallet identity as an input.
             </p>
           </section>
 
@@ -79,7 +81,7 @@ export default function PrivacyPage() {
             <ul>
               <li>display fixtures, pools, positions, squads, and play-unit balances;</li>
               <li>lock, validate, settle, void, refund, and audit pool activity;</li>
-              <li>provide relevant match news and evidence-based summaries;</li>
+              <li>provide match forecasts, relevant news, and evidence-based summaries;</li>
               <li>detect abuse, investigate errors, and secure the service;</li>
               <li>measure reliability and improve product performance; and</li>
               <li>meet applicable legal obligations.</li>

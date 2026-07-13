@@ -110,10 +110,13 @@ export default function TermsPage() {
             <h2>5. News, odds, and AI-assisted content</h2>
             <p>
               News links and article metadata may come from public RSS feeds.
-              Odds, statistics, pool movement, and AI-assisted match summaries
-              are informational signals only. They may be incomplete, delayed,
-              or wrong, and they are not financial, betting, or legal advice.
-              Always make your own decision.
+              Odds, statistics, pool movement, model forecasts, and AI-assisted
+              match summaries are informational signals only. Forecast
+              probabilities are estimates, not facts or guarantees. Fan-pool
+              shares describe participant positioning and are not used to set
+              the independent model forecast. Signals may be incomplete,
+              delayed, or wrong, and they are not financial, betting, or legal
+              advice. Always make your own decision.
             </p>
             <p>
               Third-party articles, feeds, wallets, data providers, and websites

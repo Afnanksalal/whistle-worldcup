@@ -37,8 +37,8 @@ export default function ResponsiblePlayPage() {
               <p className="legal-principle-number" aria-hidden="true">02</p>
               <h3>Every prediction can lose</h3>
               <p>
-                Form, odds, news, graphs, and AI summaries can inform a view; none
-                can make an uncertain match certain.
+                Form, model forecasts, odds, news, graphs, and AI summaries can
+                inform a view; none can make an uncertain match certain.
               </p>
             </div>
             <div className="legal-principle">
@@ -103,9 +103,11 @@ export default function ResponsiblePlayPage() {
         <section className="legal-section">
           <h2>Understand the product signals</h2>
           <p>
-            Pool movement shows participant positioning, not the probability of a
-            result. Reference odds are not a promise. News can become outdated,
-            and AI-assisted summaries can miss context or make mistakes.
+            Pool movement shows participant positioning, not an objective
+            probability. Model forecasts are uncertain estimates based on the
+            evidence actually available, and missing player-status data lowers
+            their confidence. Reference odds are not a promise. News can become
+            outdated, and AI-assisted summaries can miss context or make mistakes.
           </p>
           <p>
             TxLINE is the primary result source when configured. Public fallback

@@ -51,6 +51,7 @@ export const metadata: Metadata = {
   keywords: [
     "World Cup 2026",
     "football predictions",
+    "AI football forecasts",
     "World Cup fixtures",
     "World Cup pools",
     "parimutuel prediction pools",
@@ -130,6 +131,7 @@ export default function RootLayout({
       featureList: [
         "World Cup 2026 fixtures and match status",
         "Parimutuel match prediction pools",
+        "Evidence-labelled match forecasts",
         "Tournament standings and match road",
         "Matchday news and evidence-based insights",
         "Private squad leaderboards",
