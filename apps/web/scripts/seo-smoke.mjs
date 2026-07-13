@@ -175,7 +175,32 @@ for (const image of twitterImages) {
 }
 expectText(home.body, 'type="application/ld+json"', "structured data");
 expectText(home.body, 'rel="manifest" href="/manifest.webmanifest"', "web app manifest link");
-expectText(home.body, "/icon.png", "raster application icon");
+const advertisedIcons = elements(home.body, "link").filter((item) => {
+  const rel = (item.rel || "").toLowerCase().split(/\s+/);
+  return rel.includes("icon") || rel.includes("apple-touch-icon");
+});
+const advertisedIconHrefs = advertisedIcons.map((item) => item.href);
+assert(
+  new Set(advertisedIconHrefs).size === advertisedIconHrefs.length,
+  "duplicate browser icon links are advertised"
+);
+for (const expectedIcon of [
+  "/icons/whistle-192.png?v=20260714",
+  "/icons/whistle-apple-v2-180.png?v=20260714",
+]) {
+  assert(
+    advertisedIconHrefs.includes(expectedIcon),
+    `versioned Whistle icon ${expectedIcon} is not advertised`
+  );
+}
+assert(
+  !advertisedIconHrefs.includes("/favicon.ico"),
+  "unversioned favicon is still advertised"
+);
+assert(
+  !advertisedIconHrefs.includes("/icon.png"),
+  "unversioned app icon is still advertised"
+);
 assert(!home.body.includes("/icon.svg"), "legacy SVG application icon is still advertised");
 expectText(
   home.body,
@@ -265,9 +290,13 @@ const manifestIconPaths = [...new Set(manifestJson.icons.map((icon) => icon.src)
 for (const iconPath of manifestIconPaths) {
   await requestAsset(iconPath, "image/png", 1_024);
 }
-await requestAsset("/icon.png", "image/png", 1_024);
-await requestAsset("/apple-icon.png", "image/png", 1_024);
-await requestAsset("/favicon.ico", ["image/x-icon", "image/vnd.microsoft.icon"], 1_024);
+await requestAsset("/icons/whistle-192.png?v=20260714", "image/png", 1_024);
+await requestAsset("/icons/whistle-apple-v2-180.png?v=20260714", "image/png", 1_024);
+await requestAsset(
+  "/favicon.ico",
+  ["image/x-icon", "image/vnd.microsoft.icon"],
+  1_024
+);
 await requestAsset("/brand/whistle-logo.png", "image/png", 10_000);
 await requestAsset("/brand/pip-mascot.png", "image/png", 10_000);
 await requestAsset("/brand/pitch-banner.webp", "image/webp", 10_000);

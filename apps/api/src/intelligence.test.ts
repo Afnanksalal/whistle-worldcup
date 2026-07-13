@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Fixture, InsightCard, MarketPool } from "@whistle/shared";
 import { getWorldCupNews, parseRss, type NewsArticle } from "./news";
+import { isCurrentWorldCupArticle } from "./newsRelevance";
 import {
   engineInsights,
   extractOpenAIText,
@@ -10,6 +11,11 @@ import {
 } from "./insights";
 
 const NOW = Date.parse("2026-07-13T12:00:00Z");
+const DAY_MS = 24 * 60 * 60 * 1000;
+const BBC_WORLD_CUP_FEED =
+  "https://feeds.bbci.co.uk/sport/football/world-cup/rss.xml";
+const GUARDIAN_WORLD_CUP_FEED =
+  "https://www.theguardian.com/football/world-cup-2026/rss";
 
 const fixture: Fixture = {
   id: "france-spain",
@@ -33,6 +39,158 @@ function article(overrides: Partial<NewsArticle>): NewsArticle {
     ...overrides,
   };
 }
+
+function rssItem(
+  title: string,
+  url: string,
+  publishedAt: number,
+  description = ""
+) {
+  return `<item>
+    <title><![CDATA[${title}]]></title>
+    <link>${url}</link>
+    <description><![CDATA[${description}]]></description>
+    <pubDate>${new Date(publishedAt).toUTCString()}</pubDate>
+  </item>`;
+}
+
+describe("current World Cup news gate", () => {
+  it("accepts current semifinal, tactics, and match-report coverage", () => {
+    const accepted = [
+      article({ title: "France face Spain in World Cup semi-final" }),
+      article({
+        title: "World Cup tactics: how Argentina can break down Portugal",
+        description: "Analysis from the current tournament.",
+      }),
+      article({
+        title: "World Cup match report: Brazil 2-1 Germany",
+        description: "Brazil advance to the 2026 quarter-finals.",
+      }),
+    ];
+
+    assert.equal(
+      accepted.every((item) => isCurrentWorldCupArticle(item, NOW)),
+      true
+    );
+  });
+
+  it("accepts targeted current-tournament context and historical comparisons", () => {
+    const accepted = [
+      article({ title: "Five tactical trends from the World Cup so far" }),
+      article({ title: "Meet the four World Cup semi-finalists" }),
+      article({ title: "Morocco's remarkable World Cup run continues" }),
+      article({ title: "Inside Japan's World Cup journey and campaign" }),
+      article({ title: "Germany react to their World Cup exit" }),
+      article({ title: "The decisive World Cup knockout matches" }),
+      article({ title: "France's bid to win the World Cup" }),
+      article({
+        title: "World Cup final tactics: how France can stop Spain",
+        description: "The approach differs from the 2018 and 2022 World Cups.",
+      }),
+      article({ title: "Signs of fatigue emerge before World Cup final" }),
+      article({ title: "Signs point to a tense World Cup final" }),
+    ];
+
+    assert.equal(
+      accepted.every((item) => isCurrentWorldCupArticle(item, NOW)),
+      true
+    );
+  });
+
+  it("rejects club, transfer, excluded competition, edition, and archive stories", () => {
+    const rejected = [
+      article({
+        title: "PSG agree deal for new midfielder",
+        description: "He impressed at the 2026 World Cup semi-final.",
+      }),
+      article({ title: "PSG plot move for 2026 World Cup star" }),
+      article({
+        title: "Everton agree deal for midfielder",
+        description: "He featured in the 2026 World Cup final.",
+      }),
+      article({ title: "Bournemouth eye World Cup midfielder" }),
+      article({ title: "Brighton target a 2026 World Cup winger" }),
+      article({ title: "Brentford pursue World Cup 2026 talent" }),
+      article({ title: "A World Cup star's release clause is revealed" }),
+      article({
+        title: "Marseille and Manchester United hold talks",
+        description: "The player starred in the World Cup semi-final.",
+      }),
+      article({
+        title: "Villa working on a deal",
+        description: "The target impressed at the World Cup final.",
+      }),
+      article({
+        title: "Manchester United receive Youri Tielemans transfer boost",
+        description: "The midfielder is preparing for the 2026 World Cup final.",
+      }),
+      article({ title: "Premier League clubs eye World Cup 2026 stars" }),
+      article({ title: "Club World Cup 2026 semi-final: Chelsea v Palmeiras" }),
+      article({ title: "USWNT World Cup 2026 qualifying tactics explained" }),
+      article({ title: "Women's World Cup 2027 final hosts confirmed" }),
+      article({ title: "FIFA U-20 World Cup 2026 final preview" }),
+      article({ title: "Cricket World Cup 2026 semi-final match report" }),
+      article({ title: "Spain and Portugal reveal 2030 FIFA World Cup plans" }),
+      article({ title: "World Cup 2022 match report: Argentina lift trophy" }),
+      article({ title: "World Cup rewind: France's 1998 triumph" }),
+      article({ title: "Quiz: remember the greatest World Cup finals?" }),
+      article({
+        title: "World Cup final tactical trends",
+        description: "Explore the archive and take our quiz.",
+      }),
+      article({
+        title: "A general World Cup football story",
+        description: "This publisher note was updated in 2026.",
+      }),
+    ];
+
+    assert.deepEqual(
+      rejected.map((item) => isCurrentWorldCupArticle(item, NOW)),
+      rejected.map(() => false)
+    );
+  });
+
+  it("enforces valid publication dates and the seven-day/two-hour window", () => {
+    assert.equal(
+      isCurrentWorldCupArticle(
+        article({ publishedAt: new Date(NOW - 7 * DAY_MS).toISOString() }),
+        NOW
+      ),
+      true
+    );
+    assert.equal(
+      isCurrentWorldCupArticle(
+        article({
+          publishedAt: new Date(NOW + 2 * 60 * 60 * 1000).toISOString(),
+        }),
+        NOW
+      ),
+      true
+    );
+    assert.equal(
+      isCurrentWorldCupArticle(
+        article({ publishedAt: new Date(NOW - 7 * DAY_MS - 1).toISOString() }),
+        NOW
+      ),
+      false
+    );
+    assert.equal(
+      isCurrentWorldCupArticle(
+        article({
+          publishedAt: new Date(
+            NOW + 2 * 60 * 60 * 1000 + 1
+          ).toISOString(),
+        }),
+        NOW
+      ),
+      false
+    );
+    assert.equal(
+      isCurrentWorldCupArticle(article({ publishedAt: "not-a-date" }), NOW),
+      false
+    );
+  });
+});
 
 describe("RSS parsing", () => {
   it("extracts images, strips markup, and canonicalizes tracking URLs", () => {
@@ -114,15 +272,127 @@ describe("RSS parsing", () => {
     );
   });
 
-  it("serves stale cache when every feed is temporarily unavailable", async () => {
+  it("parses up to sixty publisher items before relevance filtering", () => {
+    const items = Array.from({ length: 61 }, (_, index) =>
+      rssItem(
+        `World Cup 2026 report ${index}`,
+        `https://example.com/report-${index}`,
+        NOW
+      )
+    ).join("");
+    const articles = parseRss(
+      `<rss><channel>${items}</channel></rss>`,
+      "Test Wire"
+    );
+
+    assert.equal(articles.length, 60);
+    assert.equal(articles.at(-1)?.url, "https://example.com/report-59");
+  });
+
+  it("uses scoped feeds and treats a partial zero-item 200 as a cacheable failure", async () => {
     const originalFetch = globalThis.fetch;
-    const xml = `
-      <rss><channel><item>
-        <title>France face Spain in World Cup semi-final</title>
-        <link>https://example.com/cached-story</link>
-        <pubDate>Mon, 13 Jul 2026 10:00:00 GMT</pubDate>
-      </item></channel></rss>`;
+    const requested: string[] = [];
+    const publishedAt = Date.now() - 60 * 60 * 1000;
     try {
+      globalThis.fetch = (async (input) => {
+        const url = String(input);
+        requested.push(url);
+        const item =
+          url === BBC_WORLD_CUP_FEED
+            ? rssItem(
+                "World Cup 2026 semi-final tactics: France v Spain",
+                "https://example.com/bbc-semifinal",
+                publishedAt
+              )
+            : rssItem(
+                "World Cup match report: Argentina reach the 2026 final",
+                "https://example.com/guardian-report",
+                publishedAt
+              );
+        return new Response(`<rss><channel>${item}</channel></rss>`, {
+          status: 200,
+        });
+      }) as typeof fetch;
+
+      const fresh = await getWorldCupNews({ force: true });
+      assert.deepEqual(
+        [...new Set(requested)].sort(),
+        [BBC_WORLD_CUP_FEED, GUARDIAN_WORLD_CUP_FEED].sort()
+      );
+      assert.deepEqual(
+        fresh.articles.map((item) => item.url).sort(),
+        [
+          "https://example.com/bbc-semifinal",
+          "https://example.com/guardian-report",
+        ]
+      );
+
+      globalThis.fetch = (async (input) => {
+        const url = String(input);
+        if (url === GUARDIAN_WORLD_CUP_FEED) {
+          return new Response("<rss><channel></channel></rss>", {
+            status: 200,
+            headers: { "content-type": "application/rss+xml" },
+          });
+        }
+        const clubStory = rssItem(
+          "PSG agree transfer deal for World Cup star",
+          "https://example.com/psg-transfer",
+          publishedAt,
+          "The player appeared in the 2026 World Cup semi-final."
+        );
+        return new Response(`<rss><channel>${clubStory}</channel></rss>`, {
+          status: 200,
+        });
+      }) as typeof fetch;
+
+      const partial = await getWorldCupNews({ force: true });
+      assert.equal(partial.stale, true);
+      assert.deepEqual(
+        partial.articles.map((item) => item.url),
+        ["https://example.com/guardian-report"]
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("returns a successful empty result when feeds contain no relevant news", async () => {
+    const originalFetch = globalThis.fetch;
+    const publishedAt = Date.now() - 60 * 60 * 1000;
+    const unrelated = rssItem(
+      "Manchester United make Youri Tielemans transfer enquiry",
+      "https://example.com/united-transfer",
+      publishedAt,
+      "The midfielder previously played at a World Cup."
+    );
+    try {
+      globalThis.fetch = (async () =>
+        new Response(`<rss><channel>${unrelated}</channel></rss>`, {
+          status: 200,
+        })) as typeof fetch;
+
+      const result = await getWorldCupNews({ force: true });
+      assert.equal(result.cached, false);
+      assert.equal(result.stale, false);
+      assert.deepEqual(result.articles, []);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("treats malformed all-feed 200 responses as failures and re-filters stale cache", async () => {
+    const originalFetch = globalThis.fetch;
+    const originalNow = Date.now;
+    let now = NOW;
+    const item = rssItem(
+      "France face Spain in World Cup semi-final",
+      "https://example.com/cached-story",
+      NOW - 60 * 60 * 1000
+    );
+    const xml = `<rss><channel>${item}</channel></rss>`;
+    try {
+      Date.now = () => now;
       globalThis.fetch = (async () =>
         new Response(xml, {
           status: 200,
@@ -133,14 +403,30 @@ describe("RSS parsing", () => {
       assert.equal(fresh.stale, false);
       assert.equal(fresh.articles.length, 1);
 
-      globalThis.fetch = (async () => {
-        throw new Error("provider unavailable");
+      globalThis.fetch = (async (input) => {
+        if (String(input) === BBC_WORLD_CUP_FEED) {
+          return new Response("<!doctype html><html><body>blocked</body></html>", {
+            status: 200,
+            headers: { "content-type": "text/html" },
+          });
+        }
+        return new Response("<rss><channel><item></channel></rss>", {
+          status: 200,
+          headers: { "content-type": "application/rss+xml" },
+        });
       }) as typeof fetch;
       const stale = await getWorldCupNews({ force: true });
       assert.equal(stale.cached, true);
       assert.equal(stale.stale, true);
       assert.equal(stale.articles[0].url, "https://example.com/cached-story");
+
+      now = NOW + 8 * DAY_MS;
+      const expired = await getWorldCupNews({ force: true });
+      assert.equal(expired.cached, true);
+      assert.equal(expired.stale, true);
+      assert.deepEqual(expired.articles, []);
     } finally {
+      Date.now = originalNow;
       globalThis.fetch = originalFetch;
     }
   });
