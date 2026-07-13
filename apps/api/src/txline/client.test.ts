@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { normalizeFixture, normalizeScoreUpdate } from "./client";
+import {
+  normalizeEpochMs,
+  normalizeFixture,
+  normalizeScoreUpdate,
+} from "./client";
 
 describe("TxLINE normalization safety", () => {
   it("rejects fixtures without a real kickoff", () => {
@@ -13,6 +17,30 @@ describe("TxLINE normalization safety", () => {
       }),
       null
     );
+  });
+
+  it("accepts explicit seconds, milliseconds, and zoned ISO timestamps", () => {
+    const instant = Date.UTC(2026, 6, 19, 19);
+    assert.equal(normalizeEpochMs(instant / 1000), instant);
+    assert.equal(normalizeEpochMs(String(instant)), instant);
+    assert.equal(normalizeEpochMs("2026-07-19T15:00:00-04:00"), instant);
+  });
+
+  it("rejects ambiguous or implausible timestamp units and zones", () => {
+    for (const value of [
+      0,
+      -1,
+      Number.NaN,
+      1_774_118_800_000_000,
+      1_774_118_800_000_000_000,
+      "2026-07-19T19:00:00",
+      "2026-02-30T19:00:00Z",
+      "2026-07-19T25:00:00Z",
+      "2026-07-19T19:00:00+14:30",
+      "2200-01-01T00:00:00Z",
+    ]) {
+      assert.equal(normalizeEpochMs(value), null);
+    }
   });
 
   it("rejects final records with missing scores instead of fabricating 0-0", () => {

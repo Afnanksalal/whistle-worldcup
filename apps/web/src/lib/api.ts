@@ -47,16 +47,6 @@ export function shortAddr(addr: string) {
   return `${addr.slice(0, 4)}…${addr.slice(-4)}`;
 }
 
-export function formatKickoff(ts: number) {
-  return new Date(ts).toLocaleString(undefined, {
-    weekday: "short",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 export function statusLabel(status: string) {
   if (status === "live") return "LIVE";
   if (status === "finished") return "FT";

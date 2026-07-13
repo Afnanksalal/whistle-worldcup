@@ -2,15 +2,21 @@
 
 import type { InsightCard } from "@whistle/shared";
 
-function relativeTime(ts?: number) {
-  if (!ts) return null;
-  const minutes = Math.max(0, Math.round((Date.now() - ts) / 60_000));
+function relativeTime(ts: number | undefined, now: number | null) {
+  if (!ts || now === null) return null;
+  const minutes = Math.max(0, Math.round((now - ts) / 60_000));
   if (minutes < 1) return "now";
   if (minutes < 60) return `${minutes}m ago`;
   return `${Math.round(minutes / 60)}h ago`;
 }
 
-export function InsightsPanel({ insights }: { insights: InsightCard[] }) {
+export function InsightsPanel({
+  insights,
+  now,
+}: {
+  insights: InsightCard[];
+  now: number | null;
+}) {
   const hasNarrative = insights.some((insight) => insight.source === "llm");
 
   return (
@@ -40,7 +46,9 @@ export function InsightsPanel({ insights }: { insights: InsightCard[] }) {
               <span>{card.source === "llm" ? "AI desk note" : card.tags[0] || "Match data"}</span>
               <span suppressHydrationWarning>
                 {card.confidence ? `${card.confidence} confidence` : "Observed"}
-                {relativeTime(card.asOf || card.ts) ? ` · ${relativeTime(card.asOf || card.ts)}` : ""}
+                {relativeTime(card.asOf || card.ts, now)
+                  ? ` · ${relativeTime(card.asOf || card.ts, now)}`
+                  : ""}
               </span>
             </div>
             <h3>{card.title}</h3>

@@ -1,11 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Fixture, MatchForecast } from "@whistle/shared";
 import { impliedShares } from "@whistle/shared";
-import { api, formatKickoff, statusLabel } from "../../../lib/api";
+import { api, statusLabel } from "../../../lib/api";
 import { useIdentity } from "../../../lib/identity";
+import {
+  formatClock,
+  formatKickoff,
+  useLocalTimeContext,
+} from "../../../lib/local-time";
 import { useRuntime } from "../../../lib/runtime";
 import { PredictionChart } from "../../../components/PredictionChart";
 import { MatchStatsPanel } from "../../../components/MatchStatsPanel";
@@ -42,7 +47,10 @@ export default function MatchPageInner({
 }) {
   const { owner, ready, withWalletAuth } = useIdentity();
   const { stakeLabel, meta } = useRuntime();
+  const timeContext = useLocalTimeContext();
   const [data, setData] = useState<MatchDetail | null>(initialDetail);
+  const [now, setNow] = useState<number | null>(initialDetail.serverNow ?? null);
+  const serverOffset = useRef(0);
   const [amount, setAmount] = useState(10);
   const [selectedMarket, setSelectedMarket] = useState<string | null>(
     initialDetail.markets[0]?.id || null
@@ -52,11 +60,20 @@ export default function MatchPageInner({
   const [notice, setNotice] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  const syncClock = useCallback((serverNow?: number) => {
+    const browserNow = Date.now();
+    if (typeof serverNow === "number" && Number.isFinite(serverNow)) {
+      serverOffset.current = serverNow - browserNow;
+    }
+    setNow(browserNow + serverOffset.current);
+  }, []);
+
   const load = useCallback(async () => {
     try {
       const query = squadId ? `?squadId=${encodeURIComponent(squadId)}` : "";
       const detail = await api<MatchDetail>(`/fixtures/${id}${query}`);
       setData(detail);
+      syncClock(detail.serverNow);
       if (!detail.forecast) {
         void api<{ forecast: MatchForecast }>(`/fixtures/${id}/forecast`)
           .then(({ forecast }) => {
@@ -75,7 +92,16 @@ export default function MatchPageInner({
     } catch {
       setError("This match is not available from the current tournament feed.");
     }
-  }, [id, squadId]);
+  }, [id, squadId, syncClock]);
+
+  useEffect(() => {
+    syncClock(initialDetail.serverNow);
+    const clock = setInterval(
+      () => setNow(Date.now() + serverOffset.current),
+      30_000
+    );
+    return () => clearInterval(clock);
+  }, [initialDetail.serverNow, syncClock]);
 
   useEffect(() => {
     void load();
@@ -166,7 +192,8 @@ export default function MatchPageInner({
   const canStake =
     market?.status === "open" &&
     fixture.status === "scheduled" &&
-    fixture.kickoffTs > Date.now();
+    now !== null &&
+    fixture.kickoffTs > now;
 
   return (
     <main id="main-content" className="shell match-page">
@@ -188,7 +215,7 @@ export default function MatchPageInner({
               dateTime={new Date(fixture.kickoffTs).toISOString()}
               suppressHydrationWarning
             >
-              {formatKickoff(fixture.kickoffTs)}
+              {formatKickoff(fixture.kickoffTs, timeContext)}
             </time>
             {fixture.venue && <span>{fixture.venue}</span>}
           </div>
@@ -216,10 +243,7 @@ export default function MatchPageInner({
               <>
                 <span>VS</span>
                 <small suppressHydrationWarning>
-                  {new Date(fixture.kickoffTs).toLocaleTimeString(undefined, {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  })}
+                  {formatClock(fixture.kickoffTs, timeContext)}
                 </small>
               </>
             )}
@@ -254,7 +278,7 @@ export default function MatchPageInner({
               homeName={fixture.home.shortName || fixture.home.name}
               awayName={fixture.away.shortName || fixture.away.name}
             />
-            <InsightsPanel insights={data.insights || []} />
+            <InsightsPanel insights={data.insights || []} now={now} />
           </div>
 
           <section className="reference-panel">
@@ -396,7 +420,7 @@ export default function MatchPageInner({
 
                   <div className="bet-rules">
                     <span suppressHydrationWarning>
-                      Closes {formatKickoff(fixture.kickoffTs)}
+                      Closes {formatKickoff(fixture.kickoffTs, timeContext)}
                     </span>
                     <span>{meta.txlineConfigured ? "Result verified at full time" : "Unverified results refund"}</span>
                   </div>

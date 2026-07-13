@@ -1,5 +1,6 @@
 import type { Fixture } from "@whistle/shared";
 import { getLogger } from "../observability";
+import { parseZonedTimestamp } from "../time";
 
 /**
  * Free public football schedule via TheSportsDB (no API key required).
@@ -19,6 +20,7 @@ export type TsdbEvent = {
   strAwayTeamBadge?: string;
   strLeague?: string;
   strSeason?: string;
+  strTimestamp?: string;
   dateEvent?: string;
   strTime?: string;
   strStatus?: string;
@@ -43,15 +45,65 @@ function statusFrom(raw?: string, hasScore?: boolean): Fixture["status"] {
   return hasScore ? "finished" : "scheduled";
 }
 
-function kickoffTs(dateEvent?: string, strTime?: string): number {
-  if (!dateEvent) return Date.now() + 3600_000;
-  const t = (strTime || "12:00:00").slice(0, 8);
-  const ms = Date.parse(`${dateEvent}T${t}Z`);
-  return Number.isFinite(ms) ? ms : Date.now() + 3600_000;
+function validUtcDate(
+  ms: number,
+  year: number,
+  month: number,
+  day: number,
+  hour: number,
+  minute: number,
+  second: number
+): boolean {
+  const parsed = new Date(ms);
+  return (
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day &&
+    parsed.getUTCHours() === hour &&
+    parsed.getUTCMinutes() === minute &&
+    parsed.getUTCSeconds() === second
+  );
+}
+
+function kickoffTs(event: TsdbEvent): number | null {
+  const timestamp = event.strTimestamp?.trim();
+  if (timestamp) {
+    const ms = parseZonedTimestamp(timestamp);
+    if (ms !== null) return ms;
+  }
+
+  const date = event.dateEvent?.trim();
+  const time = event.strTime?.trim();
+  const dateParts = date?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const timeParts = time?.match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/);
+  if (!dateParts || !timeParts) return null;
+
+  const [, yearText, monthText, dayText] = dateParts;
+  const [, hourText, minuteText, secondText = "0"] = timeParts;
+  const values = [yearText, monthText, dayText, hourText, minuteText, secondText].map(
+    Number
+  );
+  const [year, month, day, hour, minute, second] = values;
+  if (
+    month < 1 ||
+    month > 12 ||
+    day < 1 ||
+    day > 31 ||
+    hour > 23 ||
+    minute > 59 ||
+    second > 59
+  ) {
+    return null;
+  }
+
+  const ms = Date.UTC(year, month - 1, day, hour, minute, second);
+  return validUtcDate(ms, year, month, day, hour, minute, second) ? ms : null;
 }
 
 export function publicEventToFixture(ev: TsdbEvent): Fixture | null {
   if (!ev.idEvent || !ev.strHomeTeam || !ev.strAwayTeam) return null;
+  const kickoff = kickoffTs(ev);
+  if (kickoff === null) return null;
   const homeScore =
     ev.intHomeScore != null && ev.intHomeScore !== "" ? Number(ev.intHomeScore) : undefined;
   const awayScore =
@@ -67,7 +119,7 @@ export function publicEventToFixture(ev: TsdbEvent): Fixture | null {
     competition: ev.strLeague || "International",
     round: ev.strRound || undefined,
     group: ev.strGroup || undefined,
-    kickoffTs: kickoffTs(ev.dateEvent, ev.strTime),
+    kickoffTs: kickoff,
     status: statusFrom(ev.strStatus, hasScore),
     home: {
       id: ev.idHomeTeam || undefined,

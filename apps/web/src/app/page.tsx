@@ -16,6 +16,7 @@ export default async function HomePage() {
       <FixtureBoard
         initialFixtures={initialData?.fixtures ?? []}
         initialMarkets={initialData?.markets ?? []}
+        initialServerNow={initialData?.serverNow}
       />
 
       <HomeNews articles={newsData?.articles ?? []} />

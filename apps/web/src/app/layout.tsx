@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Barlow_Condensed, IBM_Plex_Mono, Manrope } from "next/font/google";
+import "./wallet-adapter.css";
 import "./globals.css";
 import { JsonLd } from "../components/JsonLd";
 import { Nav } from "../components/Nav";

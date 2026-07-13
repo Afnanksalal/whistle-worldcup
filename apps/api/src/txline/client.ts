@@ -5,6 +5,7 @@ import {
   TXLINE_MAINNET,
   isFinalScoreRecord,
 } from "@whistle/shared";
+import { parseZonedTimestamp } from "../time";
 
 export type TxlineConfig = {
   apiOrigin: string;
@@ -89,6 +90,39 @@ function pickNumber(obj: Record<string, unknown>, keys: string[]): number | unde
   return undefined;
 }
 
+const MIN_EVENT_TS = Date.UTC(2000, 0, 1);
+const MAX_EVENT_TS = Date.UTC(2100, 0, 1);
+
+export function normalizeEpochMs(value: unknown): number | null {
+  let ms: number;
+
+  if (typeof value === "string" && value.trim() && !Number.isFinite(Number(value))) {
+    const timestamp = value.trim();
+    const parsed = parseZonedTimestamp(timestamp);
+    if (parsed === null) return null;
+    ms = parsed;
+  } else {
+    const numeric = typeof value === "number" ? value : Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) return null;
+    ms = numeric < 100_000_000_000 ? numeric * 1000 : numeric;
+  }
+
+  if (!Number.isFinite(ms) || !Number.isInteger(ms)) return null;
+  if (ms < MIN_EVENT_TS || ms > MAX_EVENT_TS) return null;
+  return ms;
+}
+
+function pickTimestamp(
+  obj: Record<string, unknown>,
+  keys: string[]
+): number | null {
+  for (const key of keys) {
+    const timestamp = normalizeEpochMs(obj[key]);
+    if (timestamp !== null) return timestamp;
+  }
+  return null;
+}
+
 function teamFrom(raw: unknown, fallback: string): Fixture["home"] {
   if (!raw || typeof raw !== "object") return { name: fallback };
   const o = raw as Record<string, unknown>;
@@ -111,7 +145,7 @@ export function normalizeFixture(raw: unknown): Fixture | null {
   const away =
     teamFrom(o.away ?? o.awayTeam ?? o.AwayTeam ?? o.team2, "Away");
 
-  const kickoff = pickNumber(o, [
+  const kickoff = pickTimestamp(o, [
       "kickoffTs",
       "kickoff",
       "startTs",
@@ -121,7 +155,7 @@ export function normalizeFixture(raw: unknown): Fixture | null {
       "scheduledTs",
     ]);
   // A fabricated "now" kickoff opens/closes markets at arbitrary times.
-  if (kickoff === undefined) return null;
+  if (kickoff === null) return null;
 
   const statusRaw = (pickString(o, ["status", "Status", "state"]) || "").toLowerCase();
   let status: Fixture["status"] = "scheduled";
@@ -146,7 +180,7 @@ export function normalizeFixture(raw: unknown): Fixture | null {
     competition: pickString(o, ["competition", "Competition", "league", "competitionName"]),
     round: pickString(o, ["round", "Round", "stage"]),
     group: pickString(o, ["group", "Group", "groupName"]),
-    kickoffTs: kickoff > 1e12 ? kickoff : kickoff * 1000,
+    kickoffTs: kickoff,
     status,
     home,
     away,
@@ -205,7 +239,7 @@ export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
     return null;
   }
 
-  const rawTs = pickNumber(o, ["ts", "timestamp", "Timestamp"]) ?? Date.now();
+  const eventTs = pickTimestamp(o, ["ts", "timestamp", "Timestamp"]) ?? Date.now();
 
   return {
     fixtureId,
@@ -216,7 +250,7 @@ export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
     action,
     period,
     clock: pickString(o, ["clock", "Clock", "minute", "time"]),
-    ts: rawTs > 1e12 ? rawTs : rawTs * 1000,
+    ts: eventTs,
   };
 }
 

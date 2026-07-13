@@ -100,19 +100,40 @@ export function Nav() {
   const pathname = usePathname();
   const { meta } = useRuntime();
   const dataIsLive = meta.txlineConfigured;
+  const isHome = pathname === "/";
+  const [hasScrolled, setHasScrolled] = useState(false);
+
+  useEffect(() => {
+    if (!isHome) {
+      setHasScrolled(false);
+      return;
+    }
+
+    const updateHeader = () => setHasScrolled(window.scrollY > 20);
+    updateHeader();
+    window.addEventListener("scroll", updateHeader, { passive: true });
+    return () => window.removeEventListener("scroll", updateHeader);
+  }, [isHome]);
 
   return (
     <>
-      <header className="site-header">
+      <header
+        className={`site-header${isHome ? " is-home" : ""}${
+          hasScrolled ? " is-scrolled" : ""
+        }`}
+      >
         <div className="nav-shell">
           <div className="nav-leading">
             <Link href="/" className="brand" aria-label="Whistle home">
               <BrandMark
                 className="brand-logo"
-                variant="lockup"
+                variant="mark"
                 accessibleLabel={null}
-                priority
+                compact
               />
+              <span className="brand-wordmark" aria-hidden="true">
+                WHISTLE
+              </span>
             </Link>
             <nav className="nav-links" aria-label="Primary navigation">
               {links.map((link) => {

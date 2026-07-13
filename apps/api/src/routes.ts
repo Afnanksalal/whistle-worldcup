@@ -114,6 +114,7 @@ export function createRouter(cfg: AppConfig) {
     fixtures.sort((a: Fixture, b: Fixture) => a.kickoffTs - b.kickoffTs);
     res.json({
       fixtures: fixtures.map(publicFixture),
+      serverNow: Date.now(),
       meta: publicMeta(cfg, getFixtureSource()),
     });
   });
@@ -141,6 +142,7 @@ export function createRouter(cfg: AppConfig) {
 
     res.json({
       fixture: publicFixture(fixture),
+      serverNow: Date.now(),
       live,
       odds,
       markets,

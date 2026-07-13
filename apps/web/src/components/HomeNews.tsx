@@ -3,20 +3,11 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../lib/api";
+import { formatCalendarDate, useLocalTimeContext } from "../lib/local-time";
 import type { NewsArticle, NewsInitialData } from "../lib/seo-data";
 
 function sourceLabel(source: string) {
   return source.trim() || "News desk";
-}
-
-function formatPublishedAt(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Latest";
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-  }).format(date);
 }
 
 function HomeNewsImage({ article }: { article: NewsArticle }) {
@@ -49,6 +40,7 @@ function HomeNewsImage({ article }: { article: NewsArticle }) {
 
 export function HomeNews({ articles }: { articles: NewsArticle[] }) {
   const [feedArticles, setFeedArticles] = useState(articles);
+  const localTime = useLocalTimeContext();
 
   useEffect(() => {
     if (articles.length > 0) return;
@@ -102,7 +94,7 @@ export function HomeNews({ articles }: { articles: NewsArticle[] }) {
                   <p className="home-news-card__meta">
                     <span>{sourceLabel(article.source)}</span>
                     <time dateTime={article.publishedAt} suppressHydrationWarning>
-                      {formatPublishedAt(article.publishedAt)}
+                      {formatCalendarDate(article.publishedAt, localTime)}
                     </time>
                   </p>
                   <h3>{article.title}</h3>

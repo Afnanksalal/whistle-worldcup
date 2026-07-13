@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type { Fixture } from "@whistle/shared";
-import { api, formatKickoff, statusLabel } from "../../lib/api";
+import { api, statusLabel } from "../../lib/api";
+import { formatKickoff, useLocalTimeContext } from "../../lib/local-time";
 import type {
   GroupTable,
   StandingRow,
@@ -35,6 +36,7 @@ export default function TournamentClient({
   const [filter, setFilter] = useState<TournamentFilter>("all");
   const [loading, setLoading] = useState(initialData === null);
   const [error, setError] = useState(false);
+  const localTime = useLocalTimeContext();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -201,7 +203,7 @@ export default function TournamentClient({
                       dateTime={new Date(fixture.kickoffTs).toISOString()}
                       suppressHydrationWarning
                     >
-                      {formatKickoff(fixture.kickoffTs)}
+                      {formatKickoff(fixture.kickoffTs, localTime)}
                     </time>
                   </div>
                   <div className="tournament-fixture-teams">

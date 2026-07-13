@@ -11,6 +11,7 @@ import type {
 
 export type MatchDetail = {
   fixture: Fixture;
+  serverNow?: number;
   live?: LiveScoreUpdate;
   odds: OddsQuote[];
   markets: MarketPool[];

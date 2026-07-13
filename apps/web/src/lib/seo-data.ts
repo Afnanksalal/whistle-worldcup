@@ -4,6 +4,7 @@ import type { MatchDetail } from "./match-detail";
 
 type FixturesResponse = {
   fixtures?: Fixture[];
+  serverNow?: number;
 };
 
 type MarketsResponse = {
@@ -52,11 +53,13 @@ type NewsResponse = {
 export type HomeInitialData = {
   fixtures: Fixture[];
   markets: MarketPool[];
+  serverNow?: number;
 };
 
 export type TournamentInitialData = {
   groups: GroupTable[];
   fixtures: Fixture[];
+  serverNow?: number;
 };
 
 export type NewsInitialData = {
@@ -102,6 +105,7 @@ export async function getHomeInitialData(): Promise<HomeInitialData | null> {
   return {
     fixtures: Array.isArray(fixtureResponse?.fixtures) ? fixtureResponse.fixtures : [],
     markets: Array.isArray(marketResponse?.markets) ? marketResponse.markets : [],
+    serverNow: fixtureResponse?.serverNow,
   };
 }
 
@@ -116,6 +120,7 @@ export async function getTournamentInitialData(): Promise<TournamentInitialData 
   return {
     groups: Array.isArray(groupResponse?.groups) ? groupResponse.groups : [],
     fixtures: Array.isArray(fixtureResponse?.fixtures) ? fixtureResponse.fixtures : [],
+    serverNow: fixtureResponse?.serverNow,
   };
 }
 
@@ -151,6 +156,7 @@ export const getMatchDetailForSeo = cache(
 
     return {
       fixture: payload.fixture,
+      serverNow: payload.serverNow,
       live: payload.live,
       odds: Array.isArray(payload.odds) ? payload.odds : [],
       markets: Array.isArray(payload.markets) ? payload.markets : [],

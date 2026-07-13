@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation";
 import type { Squad } from "@whistle/shared";
 import { api } from "../../lib/api";
 import { useIdentity } from "../../lib/identity";
+import { formatCalendarDate, useLocalTimeContext } from "../../lib/local-time";
 import { BrandMark } from "../../components/BrandMark";
 import { FootballLoader } from "../../components/FootballLoader";
 
@@ -18,6 +19,7 @@ type Notice = { tone: "success" | "error" | "info"; text: string };
 export default function SquadsPage() {
   const router = useRouter();
   const { owner, ready, withWalletAuth } = useIdentity();
+  const localTime = useLocalTimeContext();
   const [squads, setSquads] = useState<SquadSummary[]>([]);
   const [name, setName] = useState("");
   const [code, setCode] = useState("");
@@ -206,10 +208,7 @@ export default function SquadsPage() {
                   <span className="squad-list-meta squad-list-date">
                     <small>Opened</small>
                     <time dateTime={new Date(squad.createdAt).toISOString()}>
-                      {new Date(squad.createdAt).toLocaleDateString(undefined, {
-                        month: "short",
-                        day: "numeric",
-                      })}
+                      {formatCalendarDate(squad.createdAt, localTime)}
                     </time>
                   </span>
                   <span className="squad-list-arrow" aria-hidden>→</span>
