@@ -70,9 +70,12 @@ function internalApiUrl(path: string): string {
   return `${base.replace(/\/$/, "")}/api${path}`;
 }
 
-async function fetchInitialJson<T>(path: string): Promise<T | null> {
+async function fetchInitialJson<T>(
+  path: string,
+  timeoutMs = 10_000
+): Promise<T | null> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 10_000);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const response = await fetch(internalApiUrl(path), {
@@ -116,8 +119,10 @@ export async function getTournamentInitialData(): Promise<TournamentInitialData 
   };
 }
 
-export async function getNewsInitialData(): Promise<NewsInitialData | null> {
-  const response = await fetchInitialJson<NewsResponse>("/news");
+export async function getNewsInitialData(
+  timeoutMs = 10_000
+): Promise<NewsInitialData | null> {
+  const response = await fetchInitialJson<NewsResponse>("/news", timeoutMs);
   if (!response) return null;
 
   return {

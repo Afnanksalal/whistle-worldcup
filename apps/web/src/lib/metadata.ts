@@ -5,7 +5,7 @@ export const SITE_TITLE = "Whistle — World Cup 2026 match prediction pools";
 export const SITE_DESCRIPTION =
   "Follow World Cup 2026 fixtures, make match predictions, track parimutuel pools, and see outcomes after the final whistle.";
 export const SOCIAL_IMAGE = {
-  url: "/opengraph-image",
+  url: "/brand/whistle-social-card.png",
   width: 1200,
   height: 630,
   alt: "Whistle — World Cup 2026 match prediction pools",

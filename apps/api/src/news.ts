@@ -84,25 +84,127 @@ function canonicalUrl(raw: string): string | null {
   return url.toString();
 }
 
-function extractImage(item: string): string | null {
-  const tags =
-    item.match(/<(?:media:content|media:thumbnail|enclosure)\b[^>]*>/gi) || [];
-  for (const tag of tags) {
-    if (/^<enclosure/i.test(tag)) {
-      const type = tag.match(/\btype\s*=\s*["']([^"']+)["']/i)?.[1] || "";
-      if (type && !type.toLowerCase().startsWith("image/")) continue;
-    }
-    const raw = tag.match(/\burl\s*=\s*["']([^"']+)["']/i)?.[1];
-    const url = raw ? safeHttpUrl(raw) : null;
-    if (url) return url;
+type ImageCandidate = {
+  url: string;
+  width: number | null;
+  height: number | null;
+};
+
+function tagAttribute(tag: string, name: string): string {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return (
+    tag.match(new RegExp(`\\b${escaped}\\s*=\\s*["']([^"']+)["']`, "i"))?.[1] ||
+    ""
+  );
+}
+
+function imageDimension(raw: string): number | null {
+  const value = Number(decodeXml(raw));
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
+function secureImageUrl(raw: string): string | null {
+  const safe = safeHttpUrl(raw);
+  if (!safe) return null;
+  const url = new URL(safe);
+  return url.protocol === "https:" ? url.toString() : null;
+}
+
+function hasImageExtension(url: string): boolean {
+  return /\.(?:avif|bmp|gif|jpe?g|png|svg|webp)$/i.test(new URL(url).pathname);
+}
+
+function hasNonImageExtension(url: string): boolean {
+  return /\.(?:aac|avi|m4a|m4v|mkv|mov|mp3|mp4|mpeg|mpg|ogg|ogv|wav|webm)$/i.test(
+    new URL(url).pathname
+  );
+}
+
+function candidateFromTag(
+  tag: string,
+  kind: "media:content" | "media:thumbnail" | "enclosure" | "html"
+): ImageCandidate | null {
+  const rawUrl = tagAttribute(tag, kind === "html" ? "src" : "url");
+  const url = rawUrl ? secureImageUrl(rawUrl) : null;
+  if (!url || hasNonImageExtension(url)) return null;
+
+  const type = decodeXml(tagAttribute(tag, "type")).toLowerCase();
+  const medium = decodeXml(tagAttribute(tag, "medium")).toLowerCase();
+  if (type && !type.startsWith("image/")) return null;
+  if (medium && medium !== "image") return null;
+
+  // Thumbnail and <img> elements are image-specific. Generic media/enclosure
+  // elements need either image metadata or an image filename when metadata is absent.
+  if (
+    (kind === "media:content" || kind === "enclosure") &&
+    !type &&
+    !medium &&
+    !hasImageExtension(url)
+  ) {
+    return null;
   }
 
-  const imageTag = firstTagValue(item, "image");
-  const nested = imageTag ? safeHttpUrl(firstTagValue(imageTag, "url")) : null;
-  if (nested) return nested;
+  return {
+    url,
+    width: imageDimension(tagAttribute(tag, "width")),
+    height: imageDimension(tagAttribute(tag, "height")),
+  };
+}
 
-  const htmlImage = item.match(/<img\b[^>]*\bsrc\s*=\s*["']([^"']+)["']/i)?.[1];
-  return htmlImage ? safeHttpUrl(htmlImage) : null;
+function candidateSize(candidate: ImageCandidate): number {
+  if (candidate.width && candidate.height) {
+    return candidate.width * candidate.height;
+  }
+  const declaredEdge = candidate.width || candidate.height || 0;
+  return declaredEdge * declaredEdge;
+}
+
+function extractImage(item: string): string | null {
+  const candidates: ImageCandidate[] = [];
+  const mediaTags =
+    item.match(/<(?:media:content|media:thumbnail|enclosure)\b[^>]*>/gi) || [];
+  for (const tag of mediaTags) {
+    const kind = tag.match(/^<\s*([^\s>]+)/)?.[1]?.toLowerCase();
+    if (
+      kind === "media:content" ||
+      kind === "media:thumbnail" ||
+      kind === "enclosure"
+    ) {
+      const candidate = candidateFromTag(tag, kind);
+      if (candidate) candidates.push(candidate);
+    }
+  }
+
+  for (const match of item.matchAll(/<image(?:\s[^>]*)?>([\s\S]*?)<\/image>/gi)) {
+    const block = match[1];
+    const url = secureImageUrl(firstTagValue(block, "url"));
+    if (!url || hasNonImageExtension(url)) continue;
+    candidates.push({
+      url,
+      width: imageDimension(firstTagValue(block, "width")),
+      height: imageDimension(firstTagValue(block, "height")),
+    });
+  }
+
+  const descriptionBlocks = [
+    firstTagValue(item, "description"),
+    firstTagValue(item, "content:encoded"),
+  ];
+  for (const rawBlock of descriptionBlocks) {
+    const block = decodeXml(rawBlock);
+    for (const tag of block.match(/<img\b[^>]*>/gi) || []) {
+      const candidate = candidateFromTag(tag, "html");
+      if (candidate) candidates.push(candidate);
+    }
+  }
+
+  let best: ImageCandidate | null = null;
+  for (const candidate of candidates) {
+    if (!best || candidateSize(candidate) > candidateSize(best)) {
+      best = candidate;
+    }
+  }
+  return best?.url || null;
 }
 
 function publishedIso(raw: string): string {

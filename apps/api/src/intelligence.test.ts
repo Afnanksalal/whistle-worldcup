@@ -53,6 +53,67 @@ describe("RSS parsing", () => {
     assert.equal(articles[0].publishedAt, "2026-07-13T10:00:00.000Z");
   });
 
+  it("prefers the largest declared image across feed and description candidates", () => {
+    const xml = `
+      <rss><channel><item>
+        <title>World Cup final preview</title>
+        <link>https://example.com/final-preview</link>
+        <media:thumbnail url="https://img.example.com/thumb.jpg" width="140" height="84" />
+        <media:content url="https://img.example.com/medium.jpg" type="image/jpeg" width="460" height="276" />
+        <enclosure url="https://img.example.com/enclosure.jpg" type="image/jpeg" width="600" height="360" />
+        <media:content url="https://img.example.com/guardian-700.jpg" type="image/jpeg" width="700" height="420" />
+        <description><![CDATA[
+          <p>Match preview.</p>
+          <img src="https://img.example.com/inline.jpg" width="320" height="180" />
+        ]]></description>
+      </item></channel></rss>`;
+
+    const articles = parseRss(xml, "Test Wire");
+    assert.equal(
+      articles[0].imageUrl,
+      "https://img.example.com/guardian-700.jpg"
+    );
+  });
+
+  it("rejects insecure and non-image media and stays null without an image", () => {
+    const xml = `
+      <rss><channel>
+        <item>
+          <title>Video analysis</title>
+          <link>https://example.com/video-analysis</link>
+          <media:content url="https://media.example.com/analysis.mp4" type="video/mp4" width="1920" height="1080" />
+          <enclosure url="https://media.example.com/podcast.mp3" type="audio/mpeg" />
+          <media:thumbnail url="http://img.example.com/insecure.jpg" width="1200" height="800" />
+          <description><![CDATA[
+            <img src="ftp://img.example.com/invalid.jpg" />
+            <img src="https://img.example.com/valid-report.webp" width="640" height="360" />
+          ]]></description>
+        </item>
+        <item>
+          <title>Plain match report</title>
+          <link>https://example.com/plain-report</link>
+          <description>No publisher artwork supplied.</description>
+        </item>
+        <item>
+          <title>Encoded image report</title>
+          <link>https://example.com/encoded-report</link>
+          <description>&lt;p&gt;Preview&lt;/p&gt;&lt;img src=&quot;https://img.example.com/encoded-report.jpg&quot; width=&quot;720&quot; height=&quot;405&quot; /&gt;</description>
+        </item>
+      </channel></rss>`;
+
+    const articles = parseRss(xml, "Test Wire");
+    assert.equal(articles.length, 3);
+    assert.equal(
+      articles[0].imageUrl,
+      "https://img.example.com/valid-report.webp"
+    );
+    assert.equal(articles[1].imageUrl, null);
+    assert.equal(
+      articles[2].imageUrl,
+      "https://img.example.com/encoded-report.jpg"
+    );
+  });
+
   it("serves stale cache when every feed is temporarily unavailable", async () => {
     const originalFetch = globalThis.fetch;
     const xml = `

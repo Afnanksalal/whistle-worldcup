@@ -113,7 +113,7 @@ status-aware caches. Tune with `TSDB_STATS_REQUESTS_PER_MIN` and
 | `/sitemap.xml` | Public product and match URL inventory; excludes wallet/private/admin routes |
 | `/robots.txt` | Allows search/retrieval crawlers, blocks training crawlers, and excludes operational paths |
 | `/llms.txt` `/llms-full.txt` | Plain-text product, provenance, settlement, news, AI, and policy context |
-| `/opengraph-image` `/twitter-image` | Branded 1200×630 share cards |
+| `/brand/whistle-social-card.png` | Branded 1200×630 Open Graph and Twitter share card |
 | `/manifest.webmanifest` | Install metadata with 192px, 512px, and maskable app icons |
 | JSON-LD | `WebSite`, `SoftwareApplication`, and per-match `SportsEvent` structured data |
 

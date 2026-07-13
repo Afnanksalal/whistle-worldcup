@@ -8,6 +8,7 @@ import {
 
 const baseUrl = (process.env.SEO_BASE_URL || "http://127.0.0.1:3000").replace(/\/$/, "");
 const expectedSiteUrl = new URL(process.env.SEO_EXPECTED_ORIGIN || "https://whistle.example");
+const SOCIAL_IMAGE_PATH = "/brand/whistle-social-card.png";
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);
@@ -38,6 +39,20 @@ async function request(path, expectedType, expectedStatus = 200) {
     );
   }
   return { response, body: await response.text(), contentType };
+}
+
+async function requestAsset(path, expectedTypes, minimumBytes = 256) {
+  const response = await fetch(`${baseUrl}${path}`, { redirect: "follow" });
+  assert(response.status === 200, `${path} returned ${response.status}, expected 200`);
+  const contentType = response.headers.get("content-type") || "";
+  const acceptedTypes = Array.isArray(expectedTypes) ? expectedTypes : [expectedTypes];
+  assert(
+    acceptedTypes.some((type) => contentType.includes(type)),
+    `${path} returned ${contentType}, expected ${acceptedTypes.join(" or ")}`
+  );
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  assert(bytes.byteLength >= minimumBytes, `${path} is unexpectedly small (${bytes.byteLength} bytes)`);
+  return { contentType, bytes };
 }
 
 function expectText(body, value, label) {
@@ -140,10 +155,33 @@ assert(homeOgImages.length > 0, "Open Graph image metadata is missing");
 for (const image of homeOgImages) {
   const imageUrl = new URL(image.content);
   assert(imageUrl.origin === expectedOrigin, "Open Graph image uses the wrong canonical origin");
+  assert(
+    imageUrl.pathname === SOCIAL_IMAGE_PATH,
+    `Open Graph image uses ${imageUrl.pathname}, expected ${SOCIAL_IMAGE_PATH}`
+  );
 }
 expectText(home.body, 'name="twitter:card" content="summary_large_image"', "Twitter card");
+const twitterImages = elements(home.body, "meta").filter(
+  (item) => (item.name || "").toLowerCase() === "twitter:image"
+);
+assert(twitterImages.length > 0, "Twitter image metadata is missing");
+for (const image of twitterImages) {
+  const imageUrl = new URL(image.content);
+  assert(imageUrl.origin === expectedOrigin, "Twitter image uses the wrong canonical origin");
+  assert(
+    imageUrl.pathname === SOCIAL_IMAGE_PATH,
+    `Twitter image uses ${imageUrl.pathname}, expected ${SOCIAL_IMAGE_PATH}`
+  );
+}
 expectText(home.body, 'type="application/ld+json"', "structured data");
 expectText(home.body, 'rel="manifest" href="/manifest.webmanifest"', "web app manifest link");
+expectText(home.body, "/icon.png", "raster application icon");
+assert(!home.body.includes("/icon.svg"), "legacy SVG application icon is still advertised");
+expectText(
+  home.body,
+  `${expectedOrigin}/brand/whistle-logo.png`,
+  "structured-data raster brand logo"
+);
 expectVisibleText(home.body, SEO_HOME_TEAM, "home server-rendered fixture home team");
 expectVisibleText(home.body, SEO_AWAY_TEAM, "home server-rendered fixture away team");
 expectPattern(
@@ -223,10 +261,24 @@ const manifestJson = JSON.parse(manifest.body);
 assert(manifestJson.icons?.some((icon) => icon.sizes === "192x192"), "manifest lacks a 192x192 icon");
 assert(manifestJson.icons?.some((icon) => icon.sizes === "512x512"), "manifest lacks a 512x512 icon");
 assert(manifestJson.icons?.some((icon) => icon.purpose === "maskable"), "manifest lacks a maskable icon");
-
-const ogImage = await request("/opengraph-image", "image/png");
-assert(ogImage.contentType.includes("image/png"), "Open Graph image is not PNG");
+const manifestIconPaths = [...new Set(manifestJson.icons.map((icon) => icon.src))];
+for (const iconPath of manifestIconPaths) {
+  await requestAsset(iconPath, "image/png", 1_024);
+}
+await requestAsset("/icon.png", "image/png", 1_024);
+await requestAsset("/apple-icon.png", "image/png", 1_024);
+await requestAsset("/favicon.ico", ["image/x-icon", "image/vnd.microsoft.icon"], 1_024);
+await requestAsset("/brand/whistle-logo.png", "image/png", 10_000);
+await requestAsset("/brand/pip-mascot.png", "image/png", 10_000);
+await requestAsset("/brand/pitch-banner.webp", "image/webp", 10_000);
+const advertisedSocialPaths = new Set([
+  ...homeOgImages.map((image) => new URL(image.content).pathname),
+  ...twitterImages.map((image) => new URL(image.content).pathname),
+]);
+for (const imagePath of advertisedSocialPaths) {
+  await requestAsset(imagePath, "image/png", 10_000);
+}
 
 console.log(
-  "SEO smoke passed: SSR content, match semantics/404, canonical origins, crawler policy, sitemap, LLM context, manifest, and social image."
+  "SEO smoke passed: SSR content, match semantics/404, canonical origins, crawler policy, sitemap, LLM context, raster brand/banner assets, manifest icons, and social image."
 );

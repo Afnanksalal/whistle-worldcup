@@ -7,6 +7,7 @@ import { Providers } from "../components/Providers";
 import { SiteFooter } from "../components/SiteFooter";
 import {
   createPageMetadata,
+  SOCIAL_IMAGE,
   SITE_DESCRIPTION,
   SITE_NAME,
   SITE_TITLE,
@@ -71,7 +72,7 @@ export const metadata: Metadata = {
   },
   icons: {
     icon: [
-      { url: "/icon.svg", type: "image/svg+xml" },
+      { url: "/icon.png", type: "image/png", sizes: "512x512" },
       { url: "/favicon.ico", sizes: "any" },
     ],
     apple: [{ url: "/apple-icon.png", sizes: "180x180", type: "image/png" }],
@@ -121,11 +122,11 @@ export default function RootLayout({
       browserRequirements:
         "Requires a modern web browser; wallet connection is optional for public match views.",
       isAccessibleForFree: true,
-      image: absoluteUrl("/opengraph-image"),
+      image: absoluteUrl(SOCIAL_IMAGE.url),
       brand: {
         "@type": "Brand",
         name: SITE_NAME,
-        logo: absoluteUrl("/brand/whistle-mark.svg"),
+        logo: absoluteUrl("/brand/whistle-logo.png"),
       },
       sameAs: ["https://github.com/Afnanksalal/whistle-worldcup"],
       featureList: [
