@@ -4,8 +4,9 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Fixture, MarketPool, Squad } from "@whistle/shared";
-import { api, formatKickoff, shortAddr } from "../../../lib/api";
+import { api, shortAddr } from "../../../lib/api";
 import { useIdentity } from "../../../lib/identity";
+import { formatKickoff, useLocalTimeContext } from "../../../lib/local-time";
 import { useRuntime } from "../../../lib/runtime";
 import { BrandMark } from "../../../components/BrandMark";
 import { FootballLoader } from "../../../components/FootballLoader";
@@ -18,6 +19,7 @@ export default function SquadDetailPage() {
   const id = String(params.id);
   const { owner, ready, withWalletAuth } = useIdentity();
   const { stakeLabel } = useRuntime();
+  const localTime = useLocalTimeContext();
   const [squad, setSquad] = useState<Squad | null>(null);
   const [markets, setMarkets] = useState<MarketPool[]>([]);
   const [fixtures, setFixtures] = useState<Fixture[]>([]);
@@ -178,7 +180,7 @@ export default function SquadDetailPage() {
               {!allFixtures.length && <option value="">No open fixtures</option>}
               {allFixtures.map((fixture) => (
                 <option key={fixture.id} value={fixture.id}>
-                  {fixture.home.name} vs {fixture.away.name} · {formatKickoff(fixture.kickoffTs)}
+                  {fixture.home.name} vs {fixture.away.name} · {formatKickoff(fixture.kickoffTs, localTime)}
                 </option>
               ))}
             </select>

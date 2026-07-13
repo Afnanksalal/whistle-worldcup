@@ -5,6 +5,7 @@ type BrandMarkProps = {
   tone?: "brand" | "inverse";
   accessibleLabel?: string | null;
   className?: string;
+  compact?: boolean;
   priority?: boolean;
 };
 
@@ -13,6 +14,7 @@ export function BrandMark({
   tone = "brand",
   accessibleLabel = "Whistle",
   className,
+  compact = false,
   priority = false,
 }: BrandMarkProps) {
   const isLockup = variant === "lockup";
@@ -20,14 +22,16 @@ export function BrandMark({
     ? tone === "inverse"
       ? "/brand/whistle-lockup-inverse.png"
       : "/brand/whistle-lockup.png"
-    : "/brand/whistle-logo.png";
+    : compact
+      ? "/icons/whistle-192.png"
+      : "/brand/whistle-logo.png";
 
   return (
     <Image
       className={className}
       src={source}
-      width={isLockup ? 1600 : 1024}
-      height={isLockup ? 360 : 1024}
+      width={isLockup ? 1600 : compact ? 48 : 1024}
+      height={isLockup ? 360 : compact ? 48 : 1024}
       alt={accessibleLabel ?? ""}
       aria-hidden={accessibleLabel ? undefined : true}
       priority={priority}

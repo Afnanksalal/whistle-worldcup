@@ -6,6 +6,7 @@ import type { Fixture, MarketPool, Position } from "@whistle/shared";
 import { payoutForPosition } from "@whistle/shared";
 import { api, shortAddr } from "../../lib/api";
 import { useIdentity } from "../../lib/identity";
+import { formatCalendarDate, useLocalTimeContext } from "../../lib/local-time";
 import { useRuntime } from "../../lib/runtime";
 import { BrandMark } from "../../components/BrandMark";
 import { FootballLoader } from "../../components/FootballLoader";
@@ -36,6 +37,7 @@ function payout(position: PosRow) {
 export default function PositionsPage() {
   const { owner, ready, withWalletAuth } = useIdentity();
   const { stakeLabel } = useRuntime();
+  const localTime = useLocalTimeContext();
   const [positions, setPositions] = useState<PosRow[]>([]);
   const [view, setView] = useState<View>("active");
   const [loading, setLoading] = useState(false);
@@ -208,7 +210,7 @@ export default function PositionsPage() {
                       <span className={`status-badge${market?.status === "settled" ? " is-finished" : ""}`}>
                         {market?.status === "void" ? "Refund" : market?.status || "Pending"}
                       </span>
-                      <small>{new Date(position.createdAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}</small>
+                      <small>{formatCalendarDate(position.createdAt, localTime)}</small>
                     </div>
                     <div className="position-match">
                       <Link href={href}>

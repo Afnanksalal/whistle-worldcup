@@ -300,6 +300,7 @@ await requestAsset(
 await requestAsset("/brand/whistle-logo.png", "image/png", 10_000);
 await requestAsset("/brand/pip-mascot.png", "image/png", 10_000);
 await requestAsset("/brand/pitch-banner.webp", "image/webp", 10_000);
+await requestAsset("/brand/pitch-banner-mobile-v2.webp", "image/webp", 100_000);
 const advertisedSocialPaths = new Set([
   ...homeOgImages.map((image) => new URL(image.content).pathname),
   ...twitterImages.map((image) => new URL(image.content).pathname),

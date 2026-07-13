@@ -1,12 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import type { MatchStats } from "@whistle/shared";
-
-function statsTime(ts: number, useLocalTime: boolean) {
-  if (!useLocalTime) return `${new Date(ts).toISOString().slice(11, 16)} UTC`;
-  return new Date(ts).toLocaleTimeString();
-}
+import { formatClock, useLocalTimeContext } from "../lib/local-time";
 
 function Bar({
   label,
@@ -80,9 +75,7 @@ export function MatchStatsPanel({
   homeName: string;
   awayName: string;
 }) {
-  const [useLocalTime, setUseLocalTime] = useState(false);
-
-  useEffect(() => setUseLocalTime(true), []);
+  const localTime = useLocalTimeContext();
 
   if (!stats) {
     return (
@@ -111,7 +104,7 @@ export function MatchStatsPanel({
           Match statistics
         </h2>
         <span className="mono" style={{ color: "var(--mute)", fontSize: "0.68rem" }}>
-          {stats.source.toUpperCase()} · {statsTime(stats.updatedAt, useLocalTime)}
+          {stats.source.toUpperCase()} · {formatClock(stats.updatedAt, localTime)}
         </span>
       </div>
       {!rows.length && (

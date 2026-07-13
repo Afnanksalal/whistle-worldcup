@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import {
   Bar,
   CartesianGrid,
@@ -12,6 +12,7 @@ import {
   YAxis,
 } from "recharts";
 import type { PricePoint } from "@whistle/shared";
+import { formatClock, useLocalTimeContext } from "../lib/local-time";
 
 const COLORS: Record<string, string> = {
   home: "#1d664d",
@@ -30,14 +31,6 @@ type Props = {
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
-function chartTime(ts: number, useLocalTime: boolean) {
-  if (!useLocalTime) return `${new Date(ts).toISOString().slice(11, 16)} UTC`;
-  return new Date(ts).toLocaleTimeString(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 function compactPoints(points: PricePoint[]) {
   return points.filter((point, index) => {
     if (index === 0 || index === points.length - 1) return true;
@@ -51,9 +44,7 @@ function compactPoints(points: PricePoint[]) {
 
 export function PredictionChart({ history, labels }: Props) {
   const [range, setRange] = useState<Range>("60m");
-  const [useLocalTime, setUseLocalTime] = useState(false);
-
-  useEffect(() => setUseLocalTime(true), []);
+  const localTime = useLocalTimeContext();
   const latest = history[history.length - 1];
   const keys = Object.keys(latest?.implied || labels);
   const hasLiquidity = (latest?.totalPool || 0) > 0;
@@ -68,7 +59,7 @@ export function PredictionChart({ history, labels }: Props) {
   const data = ranged.map((point) => {
     const row: Record<string, number | string> = {
       ts: point.ts,
-      time: chartTime(point.ts, useLocalTime),
+      time: formatClock(point.ts, localTime),
       pool: point.totalPool,
     };
     for (const key of keys) row[key] = Number(((point.implied[key] || 0) * 100).toFixed(2));
@@ -121,7 +112,7 @@ export function PredictionChart({ history, labels }: Props) {
         <div>
           <span>Last update</span>
           <strong>
-            {latest ? chartTime(latest.ts, useLocalTime) : "Waiting"}
+            {latest ? formatClock(latest.ts, localTime) : "Waiting"}
           </strong>
         </div>
       </div>

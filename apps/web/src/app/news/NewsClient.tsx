@@ -2,6 +2,11 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { api } from "../../lib/api";
+import {
+  formatCalendarDate,
+  type LocalTimeContext,
+  useLocalTimeContext,
+} from "../../lib/local-time";
 import type { NewsArticle, NewsInitialData } from "../../lib/seo-data";
 
 type LoadState = "loading" | "ready" | "error";
@@ -19,18 +24,6 @@ function sourceMonogram(source: string) {
     .slice(0, 2);
 
   return words.map((word) => word[0]).join("").toUpperCase();
-}
-
-function formatPublishedAt(value: string) {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Recently published";
-
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(date);
 }
 
 function articleLinkLabel(article: NewsArticle) {
@@ -87,7 +80,13 @@ function ArticleImage({
   );
 }
 
-function StoryMeta({ article }: { article: NewsArticle }) {
+function StoryMeta({
+  article,
+  localTime,
+}: {
+  article: NewsArticle;
+  localTime: LocalTimeContext;
+}) {
   return (
     <p className="news-story-meta">
       <span className="news-story-meta__source">{sourceLabel(article.source)}</span>
@@ -99,7 +98,7 @@ function StoryMeta({ article }: { article: NewsArticle }) {
         dateTime={article.publishedAt}
         suppressHydrationWarning
       >
-        {formatPublishedAt(article.publishedAt)}
+        {formatCalendarDate(article.publishedAt, localTime, true)}
       </time>
     </p>
   );
@@ -118,6 +117,7 @@ export default function NewsClient({
   );
   const [requestVersion, setRequestVersion] = useState(0);
   const initiallySeeded = initialData !== null;
+  const localTime = useLocalTimeContext();
 
   useEffect(() => {
     const controller = new AbortController();
@@ -320,7 +320,7 @@ export default function NewsClient({
                     <ArticleImage key={featuredArticle.id} article={featuredArticle} featured />
                   )}
                   <div className="news-feature__content">
-                    <StoryMeta article={featuredArticle} />
+                    <StoryMeta article={featuredArticle} localTime={localTime} />
                     <h2 className="news-feature__title" id="featured-story-title">
                       {featuredArticle.title}
                     </h2>
@@ -368,7 +368,7 @@ export default function NewsClient({
                           >
                             <ArticleImage article={article} />
                             <div className="news-card__content">
-                              <StoryMeta article={article} />
+                              <StoryMeta article={article} localTime={localTime} />
                               <h3 className="news-card__title">{article.title}</h3>
                               {article.description && (
                                 <p className="news-card__description">{article.description}</p>
@@ -398,7 +398,7 @@ export default function NewsClient({
                               rel="noopener noreferrer"
                               aria-label={articleLinkLabel(article)}
                             >
-                              <StoryMeta article={article} />
+                              <StoryMeta article={article} localTime={localTime} />
                               <strong>{article.title}</strong>
                               <span aria-hidden>↗</span>
                             </a>

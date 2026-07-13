@@ -18,6 +18,8 @@ function send(response, status, payload, contentType = "application/json; charse
   const body = typeof payload === "string" ? payload : JSON.stringify(payload);
   response.writeHead(status, {
     "Access-Control-Allow-Origin": "*",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Cache-Control": "no-store",
     "Content-Type": contentType,
   });
@@ -26,6 +28,16 @@ function send(response, status, payload, contentType = "application/json; charse
 
 const server = createServer((request, response) => {
   const url = new URL(request.url || "/", `http://${host}:${rawPort}`);
+
+  if (request.method === "OPTIONS") {
+    response.writeHead(204, {
+      "Access-Control-Allow-Origin": "*",
+      "Access-Control-Allow-Headers": "Content-Type, Authorization",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+    });
+    response.end();
+    return;
+  }
 
   if (url.pathname === "/health") {
     send(response, 200, "ok", "text/plain; charset=utf-8");
@@ -36,7 +48,11 @@ const server = createServer((request, response) => {
     return;
   }
   if (url.pathname === "/api/fixtures") {
-    send(response, 200, { fixtures: [seoFixture], meta: seoMeta });
+    send(response, 200, {
+      fixtures: [seoFixture],
+      serverNow: Date.now(),
+      meta: seoMeta,
+    });
     return;
   }
   if (url.pathname === "/api/markets") {
@@ -66,6 +82,7 @@ const server = createServer((request, response) => {
     }
     send(response, 200, {
       fixture: seoFixture,
+      serverNow: Date.now(),
       live: null,
       odds: [],
       markets: [seoMarket],

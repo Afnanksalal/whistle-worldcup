@@ -5,45 +5,31 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Fixture, MarketPool } from "@whistle/shared";
 import { impliedShares } from "@whistle/shared";
-import { api, formatKickoff, statusLabel, wsUrl } from "../lib/api";
+import { api, statusLabel, wsUrl } from "../lib/api";
+import {
+  calendarDateKey,
+  formatCalendarDate,
+  formatClock,
+  formatDayLabel,
+  formatKickoff,
+  timeZoneLabel,
+  useLocalTimeContext,
+} from "../lib/local-time";
 import { useRuntime, type AppMeta } from "../lib/runtime";
 import { FootballLoader } from "./FootballLoader";
 import { TeamCrest, teamShortCode } from "./TeamCrest";
 
-type FixturesRes = { fixtures: Fixture[]; meta?: AppMeta };
+type FixturesRes = { fixtures: Fixture[]; serverNow?: number; meta?: AppMeta };
 type MarketsRes = { markets: MarketPool[] };
 type BoardFilter = "next" | "live" | "results";
 
 type FixtureBoardProps = {
   initialFixtures?: Fixture[];
   initialMarkets?: MarketPool[];
+  initialServerNow?: number;
 };
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
-
-function dayLabel(ts: number, now: number | null) {
-  const match = new Date(ts);
-  if (now === null) {
-    return match.toLocaleDateString("en", {
-      weekday: "long",
-      month: "short",
-      day: "numeric",
-      timeZone: "UTC",
-    });
-  }
-
-  const today = new Date(now);
-  const tomorrow = new Date(today);
-  tomorrow.setDate(today.getDate() + 1);
-  const key = match.toDateString();
-  if (key === today.toDateString()) return "Today";
-  if (key === tomorrow.toDateString()) return "Tomorrow";
-  return match.toLocaleDateString(undefined, {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-  });
-}
 
 function matchStatusClass(status: Fixture["status"]) {
   if (status === "live") return " is-live";
@@ -54,15 +40,26 @@ function matchStatusClass(status: Fixture["status"]) {
 export function FixtureBoard({
   initialFixtures = [],
   initialMarkets = [],
+  initialServerNow,
 }: FixtureBoardProps) {
   const { meta, stakeLabel } = useRuntime();
+  const timeContext = useLocalTimeContext();
   const [fixtures, setFixtures] = useState<Fixture[]>(initialFixtures);
   const [markets, setMarkets] = useState<MarketPool[]>(initialMarkets);
   const [filter, setFilter] = useState<BoardFilter>("next");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(initialFixtures.length === 0);
-  const [now, setNow] = useState<number | null>(null);
+  const [now, setNow] = useState<number | null>(initialServerNow ?? null);
+  const serverOffset = useRef(0);
   const refreshQueued = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const syncClock = useCallback((serverNow?: number) => {
+    const browserNow = Date.now();
+    if (typeof serverNow === "number" && Number.isFinite(serverNow)) {
+      serverOffset.current = serverNow - browserNow;
+    }
+    setNow(browserNow + serverOffset.current);
+  }, []);
 
   const load = useCallback(async (showLoader = false) => {
     if (showLoader) setLoading(true);
@@ -73,19 +70,23 @@ export function FixtureBoard({
       ]);
       setFixtures(fixtureRes.fixtures);
       setMarkets(marketRes.markets);
+      syncClock(fixtureRes.serverNow);
       setError(null);
     } catch {
       setError("The match feed is taking longer than expected. We’ll keep trying.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [syncClock]);
 
   useEffect(() => {
-    setNow(Date.now());
+    syncClock(initialServerNow);
     void load(initialFixtures.length === 0);
     const poll = setInterval(() => void load(), 20_000);
-    const clock = setInterval(() => setNow(Date.now()), 30_000);
+    const clock = setInterval(
+      () => setNow(Date.now() + serverOffset.current),
+      30_000
+    );
     let socket: WebSocket | null = null;
 
     try {
@@ -107,7 +108,7 @@ export function FixtureBoard({
       if (refreshQueued.current) clearTimeout(refreshQueued.current);
       socket?.close();
     };
-  }, [initialFixtures.length, load]);
+  }, [initialFixtures.length, initialServerNow, load, syncClock]);
 
   const ordered = useMemo(
     () => [...fixtures].sort((a, b) => a.kickoffTs - b.kickoffTs),
@@ -116,7 +117,7 @@ export function FixtureBoard({
   const live = ordered.filter((fixture) => fixture.status === "live");
   const upcoming = ordered.filter(
     (fixture) =>
-      fixture.status === "scheduled" && fixture.kickoffTs > (now || 0) - 15 * 60_000
+      fixture.status === "scheduled" && fixture.kickoffTs > (now ?? 0)
   );
   const results = ordered
     .filter((fixture) => fixture.status === "finished")
@@ -135,13 +136,17 @@ export function FixtureBoard({
   }, [filter, live, results, upcoming]);
 
   const grouped = useMemo(() => {
-    const map = new Map<string, Fixture[]>();
+    const map = new Map<string, { label: string; fixtures: Fixture[] }>();
     for (const fixture of shown) {
-      const label = dayLabel(fixture.kickoffTs, now);
-      map.set(label, [...(map.get(label) || []), fixture]);
+      const key = calendarDateKey(fixture.kickoffTs, timeContext.timeZone);
+      const current = map.get(key);
+      map.set(key, {
+        label: formatDayLabel(fixture.kickoffTs, now, timeContext),
+        fixtures: [...(current?.fixtures || []), fixture],
+      });
     }
     return [...map.entries()];
-  }, [now, shown]);
+  }, [now, shown, timeContext]);
 
   const featuredMarkets = featured ? marketsFor(featured.id) : [];
   const featuredResult = featuredMarkets.find((market) => market.marketType === "match_result");
@@ -153,15 +158,22 @@ export function FixtureBoard({
   return (
     <>
       <section className="home-hero" aria-labelledby="home-title">
-        <Image
-          className="home-hero__image"
-          src="/brand/pitch-banner.webp"
-          alt=""
-          fill
-          priority
-          sizes="100vw"
-          aria-hidden="true"
-        />
+        <picture className="home-hero__media">
+          <source
+            media="(max-width: 900px)"
+            srcSet="/brand/pitch-banner-mobile-v2.webp"
+            type="image/webp"
+          />
+          <Image
+            className="home-hero__image"
+            src="/brand/pitch-banner.webp"
+            alt=""
+            fill
+            loading="eager"
+            fetchPriority="high"
+            sizes="100vw"
+          />
+        </picture>
         <div className="home-hero__shade" aria-hidden="true" />
 
         <div className="shell home-hero-grid">
@@ -170,11 +182,7 @@ export function FixtureBoard({
               <span>FIFA WORLD CUP 26</span>
               <time dateTime={now ? new Date(now).toISOString() : undefined} suppressHydrationWarning>
                 {now
-                  ? new Date(now).toLocaleDateString(undefined, {
-                      month: "long",
-                      day: "numeric",
-                      year: "numeric",
-                    })
+                  ? formatCalendarDate(now, timeContext)
                   : "Tournament live"}
               </time>
             </div>
@@ -218,7 +226,7 @@ export function FixtureBoard({
                         dateTime={new Date(featured.kickoffTs).toISOString()}
                         suppressHydrationWarning
                       >
-                        {formatKickoff(featured.kickoffTs)}
+                        {formatKickoff(featured.kickoffTs, timeContext)}
                       </time>
                     </>
                   ) : (
@@ -372,9 +380,7 @@ export function FixtureBoard({
             ))}
           </div>
           <span className="timezone-note">
-            Times shown in {now
-              ? Intl.DateTimeFormat().resolvedOptions().timeZone.replace(/_/g, " ")
-              : "your local time"}
+            Times shown in {timeZoneLabel(timeContext)}
           </span>
         </div>
 
@@ -397,14 +403,14 @@ export function FixtureBoard({
           </div>
         )}
 
-        {((!loading && !error) || fixtures.length > 0) && grouped.map(([day, dayFixtures]) => (
-          <div className="fixture-day" key={day}>
+        {((!loading && !error) || fixtures.length > 0) && grouped.map(([dayKey, day]) => (
+          <div className="fixture-day" key={dayKey}>
             <div className="fixture-day-label">
-              <span>{day}</span>
+              <span>{day.label}</span>
               <i />
             </div>
             <div className="fixture-list">
-              {dayFixtures.map((fixture) => {
+              {day.fixtures.map((fixture) => {
                 const fixtureMarkets = marketsFor(fixture.id);
                 const resultMarket = fixtureMarkets.find((market) => market.marketType === "match_result");
                 const pool = fixtureMarkets.reduce((sum, market) => sum + market.totalPool, 0);
@@ -421,10 +427,7 @@ export function FixtureBoard({
                         dateTime={new Date(fixture.kickoffTs).toISOString()}
                         suppressHydrationWarning
                       >
-                        {new Date(fixture.kickoffTs).toLocaleTimeString(undefined, {
-                          hour: "2-digit",
-                          minute: "2-digit",
-                        })}
+                        {formatClock(fixture.kickoffTs, timeContext)}
                       </time>
                       <small>{fixture.round || fixture.group || "World Cup"}</small>
                     </div>

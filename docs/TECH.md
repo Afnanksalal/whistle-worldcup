@@ -63,10 +63,17 @@ Networks: **devnet** `https://txline-dev.txodds.com` or **mainnet** free tiers.
 |----------|-------|
 | `GET /api/health` `/ready` `/live` `/metrics` | Health + Prometheus |
 | `GET /api/fixtures/:id/forecast` | Deterministic 1X2 probabilities, evidence/confidence/freshness, optional Groq note, and separate pool-implied crowd snapshot |
-| `GET /api/fixtures` `/groups` `/news` `/meta` | Product data |
+| `GET /api/fixtures` `/groups` `/news` `/meta` | Product data; fixture responses include `serverNow` for clock-safe client cutoffs |
+| `GET /api/fixtures/:id` | Match, markets, live context, and `serverNow` for the stake UI |
 | `GET /api/admin/overview` | Admin key required |
 | `POST /api/markets/:id/settle\|void\|lock` | Admin key required |
 | `POST /api/markets/:id/deposit` | Wallet identity |
+
+Provider kickoffs accept only plausible epoch seconds/milliseconds or zoned ISO
+timestamps with real calendar fields. Missing, offset-less, impossible, and
+ambiguous values are rejected rather than replaced with a synthetic kickoff.
+The web renders UTC deterministically for SSR, then switches to the visitor's
+validated IANA time zone; stake availability remains synchronized to API time.
 
 ## Forecast boundary
 
