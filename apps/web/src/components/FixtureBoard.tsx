@@ -153,6 +153,17 @@ export function FixtureBoard({
   return (
     <>
       <section className="home-hero" aria-labelledby="home-title">
+        <Image
+          className="home-hero__image"
+          src="/brand/pitch-banner.webp"
+          alt=""
+          fill
+          priority
+          sizes="100vw"
+          aria-hidden="true"
+        />
+        <div className="home-hero__shade" aria-hidden="true" />
+
         <div className="shell home-hero-grid">
           <div className="home-intro">
             <div className="tournament-date">
@@ -165,7 +176,7 @@ export function FixtureBoard({
                       year: "numeric",
                     })
                   : "Tournament live"}
-                </time>
+              </time>
             </div>
             <div className="home-intro__title">
               <p className="section-kicker">Today&apos;s matches</p>
@@ -186,20 +197,9 @@ export function FixtureBoard({
             </div>
           </div>
 
-          <div className="matchday-banner">
-            <Image
-              className="matchday-banner__image"
-              src="/brand/pitch-banner.webp"
-              alt=""
-              fill
-              priority
-              sizes="(max-width: 900px) calc(100vw - 2rem), 1240px"
-              aria-hidden="true"
-            />
-            <div className="matchday-banner__shade" aria-hidden="true" />
-            <div className="featured-wrap">
-              {featured ? (
-                <article className="featured-match">
+          <div className="featured-wrap">
+            {featured ? (
+              <article className="featured-match">
                 <div className="featured-topline">
                   <div>
                     <span className={`status-badge${matchStatusClass(featured.status)}`}>
@@ -295,28 +295,27 @@ export function FixtureBoard({
                 <Link className="featured-cta" href={`/match/${featured.id}`}>
                   Open match pool <span aria-hidden>→</span>
                 </Link>
-                </article>
-              ) : (
-                <div className="featured-match featured-empty">
-                  <p className="section-kicker">Match feed</p>
-                  {loading ? (
-                    <FootballLoader label="Loading the tournament…" inverse />
-                  ) : (
-                    <>
-                      <h2>The next kickoff is being confirmed.</h2>
-                      <Image
-                        className="featured-empty-mascot"
-                        src="/brand/pip-mascot.png"
-                        alt=""
-                        width={1254}
-                        height={1254}
-                        aria-hidden="true"
-                      />
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
+              </article>
+            ) : (
+              <div className="featured-match featured-empty">
+                <p className="section-kicker">Match feed</p>
+                {loading ? (
+                  <FootballLoader label="Loading the tournament…" inverse />
+                ) : (
+                  <>
+                    <h2>The next kickoff is being confirmed.</h2>
+                    <Image
+                      className="featured-empty-mascot"
+                      src="/brand/pip-mascot.png"
+                      alt=""
+                      width={1254}
+                      height={1254}
+                      aria-hidden="true"
+                    />
+                  </>
+                )}
+              </div>
+            )}
           </div>
 
           <ol className="match-flow" aria-label="From schedule to settlement">

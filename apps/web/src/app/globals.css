@@ -421,30 +421,55 @@ h3,
 }
 
 .home-hero {
+  position: relative;
+  min-height: calc(100svh - 4.75rem);
+  overflow: hidden;
+  isolation: isolate;
   border-bottom: 1px solid var(--line);
-  background: var(--paper);
+  background: var(--forest-deep);
+  color: var(--paper);
+}
+
+.home-hero__image {
+  z-index: -2;
+  object-fit: cover;
+  object-position: 58% 50%;
+  filter: saturate(0.9) contrast(1.04);
+  transform: scale(1.015);
+}
+
+.home-hero__shade {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  background:
+    linear-gradient(90deg, rgba(7, 24, 17, 0.9) 0%, rgba(7, 24, 17, 0.72) 40%, rgba(7, 24, 17, 0.38) 74%, rgba(7, 24, 17, 0.22) 100%),
+    linear-gradient(0deg, rgba(7, 24, 17, 0.62) 0%, transparent 48%, rgba(7, 24, 17, 0.2) 100%);
+  pointer-events: none;
 }
 
 .home-hero-grid {
   display: grid;
-  padding-block: clamp(2.5rem, 5vw, 4.5rem);
-  gap: clamp(1.5rem, 3vw, 2.5rem);
+  position: relative;
+  min-height: calc(100svh - 4.75rem);
+  padding-block: clamp(3rem, 6vw, 5.5rem) clamp(1.75rem, 3vw, 2.5rem);
+  align-items: center;
+  grid-template-columns: minmax(0, 1fr) minmax(29rem, 0.82fr);
+  grid-template-rows: minmax(0, 1fr) auto;
+  gap: clamp(2.5rem, 6vw, 6rem);
+  row-gap: clamp(2rem, 4vw, 3.5rem);
 }
 
 .home-intro {
-  display: grid;
-  align-items: end;
-  grid-template-columns: minmax(0, 1fr) minmax(19rem, 0.44fr);
-  column-gap: clamp(2rem, 8vw, 8rem);
+  max-width: 39rem;
 }
 
 .tournament-date {
   display: flex;
-  margin-bottom: 1.8rem;
+  margin-bottom: clamp(2.2rem, 5vw, 4.5rem);
   align-items: center;
   gap: 0.9rem;
-  grid-column: 1 / -1;
-  color: var(--muted);
+  color: rgba(251, 252, 248, 0.68);
   font-family: var(--font-data), monospace;
   font-size: 0.64rem;
   font-weight: 500;
@@ -453,29 +478,36 @@ h3,
 
 .tournament-date span {
   padding: 0.35rem 0.5rem;
-  border: 1px solid var(--line-strong);
-  color: var(--forest);
+  border: 1px solid rgba(251, 252, 248, 0.35);
+  background: rgba(7, 24, 17, 0.28);
+  color: var(--brass-soft);
   font-weight: 600;
 }
 
+.home-intro .section-kicker {
+  color: #ff856d;
+}
+
 .home-intro h1 {
-  max-width: 13ch;
+  max-width: 10ch;
   margin: 0.55rem 0 1.2rem;
-  color: var(--ink);
-  font-size: clamp(3.6rem, 6.3vw, 6rem);
+  color: var(--paper);
+  font-size: clamp(4.6rem, 7vw, 7.2rem);
   font-weight: 800;
   letter-spacing: -0.045em;
-  line-height: 0.88;
+  line-height: 0.84;
+  text-shadow: 0 0.1em 0.7em rgba(7, 24, 17, 0.26);
 }
 
 .home-intro__copy {
-  padding-bottom: 1.1rem;
+  max-width: 29rem;
+  padding-bottom: 0;
 }
 
 .home-lede {
   max-width: 31rem;
   margin: 0;
-  color: var(--muted-strong);
+  color: rgba(251, 252, 248, 0.78);
   font-size: clamp(0.98rem, 1.2vw, 1.08rem);
   line-height: 1.65;
 }
@@ -488,34 +520,29 @@ h3,
   flex-wrap: wrap;
 }
 
-.matchday-banner {
-  position: relative;
-  min-height: 34rem;
-  overflow: hidden;
-  border: 1px solid rgba(20, 35, 29, 0.28);
-  background: #315d2d;
-  box-shadow: 0 22px 55px rgba(16, 47, 39, 0.13);
+.home-hero .btn-primary {
+  border-color: var(--paper);
+  background: var(--paper);
+  color: var(--forest-deep);
 }
 
-.matchday-banner__image {
-  object-fit: cover;
-  object-position: 58% 50%;
+.home-hero .btn-primary:hover:not(:disabled) {
+  border-color: var(--brass-soft);
+  background: var(--brass-soft);
 }
 
-.matchday-banner__shade {
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(90deg, rgba(7, 25, 18, 0.56) 0, rgba(7, 25, 18, 0.24) 40%, rgba(7, 25, 18, 0.02) 72%),
-    linear-gradient(0deg, rgba(7, 25, 18, 0.18), transparent 42%);
-  pointer-events: none;
+.home-hero .text-link {
+  border-color: rgba(251, 252, 248, 0.42);
+  color: var(--paper);
 }
 
 .featured-wrap {
   position: relative;
   z-index: 1;
-  width: min(31rem, calc(100% - 4rem));
-  margin: 2rem;
+  width: 100%;
+  max-width: 32rem;
+  margin: 0;
+  justify-self: end;
 }
 
 .featured-match {
@@ -523,18 +550,21 @@ h3,
   min-height: 30rem;
   padding: clamp(1.35rem, 3vw, 2.25rem);
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(16, 47, 39, 0.95);
+  background: rgba(10, 42, 32, 0.92);
   color: var(--paper);
-  box-shadow: 0 22px 54px rgba(7, 25, 18, 0.28);
-  backdrop-filter: blur(8px);
+  box-shadow: 0 28px 70px rgba(5, 19, 14, 0.38);
+  backdrop-filter: blur(14px);
 }
 
 .match-flow {
   display: grid;
-  margin: -2.5rem 0 0;
+  margin: 0;
   padding: 0;
-  border: 1px solid var(--line);
-  background: var(--paper-strong);
+  border: 1px solid rgba(251, 252, 248, 0.38);
+  background: rgba(251, 252, 248, 0.9);
+  box-shadow: 0 16px 44px rgba(5, 19, 14, 0.22);
+  backdrop-filter: blur(14px);
+  grid-column: 1 / -1;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   list-style: none;
 }
@@ -1482,6 +1512,16 @@ a.panel:hover {
 @media (max-width: 900px) {
   .shell { width: min(100% - 2rem, 46rem); }
   .nav-links { display: none; }
+  .home-hero { min-height: auto; }
+  .home-hero-grid {
+    min-height: auto;
+    padding-block: 3.2rem 2rem;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto;
+    gap: 2.25rem;
+  }
+  .home-intro { max-width: 40rem; }
+  .featured-wrap { max-width: 38rem; justify-self: start; }
   .fixture-card {
     grid-template-columns: 6rem minmax(0, 1fr) 5.5rem 1rem;
   }
@@ -1572,21 +1612,20 @@ a.panel:hover {
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
   }
-  .home-hero-grid { padding-block: 2.2rem 3rem; gap: 1.35rem; }
-  .home-intro { grid-template-columns: 1fr; }
+  .home-hero-grid { padding-block: 2.2rem 1.25rem; gap: 1.5rem; }
   .home-intro__copy { padding-bottom: 0; }
   .tournament-date { margin-bottom: 1.5rem; }
   .home-intro h1 { max-width: 12ch; font-size: clamp(3.4rem, 14vw, 4.9rem); }
-  .matchday-banner { min-height: 45rem; }
-  .matchday-banner__image { object-position: 60% 50%; }
-  .matchday-banner__shade {
+  .home-hero__image { object-position: 62% 50%; }
+  .home-hero__shade {
     background:
-      linear-gradient(0deg, rgba(7, 25, 18, 0.42), transparent 62%),
-      linear-gradient(90deg, rgba(7, 25, 18, 0.2), transparent 70%);
+      linear-gradient(0deg, rgba(7, 24, 17, 0.82) 0%, rgba(7, 24, 17, 0.48) 50%, rgba(7, 24, 17, 0.62) 100%),
+      linear-gradient(90deg, rgba(7, 24, 17, 0.72), rgba(7, 24, 17, 0.2));
   }
   .featured-wrap {
-    width: calc(100% - 1.25rem);
-    margin: 9.5rem 0.625rem 0.625rem;
+    width: 100%;
+    max-width: none;
+    margin: 0;
   }
   .featured-match { min-height: 34rem; padding: 1.25rem; background: rgba(16, 47, 39, 0.93); }
   .match-flow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
