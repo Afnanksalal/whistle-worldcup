@@ -12,7 +12,7 @@ Powered by [TxLINE](https://txline.txodds.com) sports data on Solana (with free 
 
 - **Markets board** — live schedule with pool sizes
 - **Group stage** — standings derived from finished fixtures (`/groups`)
-- **News** — keyless RSS (BBC / ESPN / Guardian) at `/news`
+- **News** — keyless, World Cup-scoped BBC and Guardian RSS at `/news`
 - **Parimutuel pools** — 1X2 + O/U 2.5; pool composition sets price
 - **Match desk** — scores, stake UI, reference odds when TxLINE SSE is live
 - **Squads** — private books, invite codes, leaderboards
@@ -48,7 +48,7 @@ Open [http://localhost:3000](http://localhost:3000). Admin: [http://localhost:30
 |----------|--------|------|
 | 1 | TxLINE REST + SSE | Real `TXLINE_API_TOKEN` (not `txl_…` placeholder) |
 | 2 | TheSportsDB (free, no key) | Placeholder token or TxLINE unreachable |
-| News | Public RSS | Always — no API key |
+| News | World Cup-scoped BBC + Guardian RSS | Always — no API key |
 
 There is **no demo mode**. `DEMO_MODE` / `ALLOW_SANDBOX` crash boot if set.
 

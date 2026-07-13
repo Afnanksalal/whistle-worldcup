@@ -1,4 +1,5 @@
 import { getLogger } from "./observability";
+import { isCurrentWorldCupArticle } from "./newsRelevance";
 
 export type NewsArticle = {
   id: string;
@@ -17,16 +18,15 @@ export type NewsResult = {
   stale: boolean;
 };
 
-type Cache = { at: number; articles: NewsArticle[] };
+type Cache = { at: number; articles: NewsArticle[]; stale: boolean };
 
 let cache: Cache | null = null;
 
 const TTL_MS = positiveEnv("NEWS_CACHE_TTL_MS", 8 * 60 * 1000);
 const FETCH_TIMEOUT_MS = positiveEnv("NEWS_FETCH_TIMEOUT_MS", 8_000);
 const FEEDS: ReadonlyArray<readonly [string, string]> = [
-  ["https://feeds.bbci.co.uk/sport/football/rss.xml", "BBC Sport"],
-  ["https://www.espn.com/espn/rss/soccer/news", "ESPN"],
-  ["https://www.theguardian.com/football/rss", "The Guardian"],
+  ["https://feeds.bbci.co.uk/sport/football/world-cup/rss.xml", "BBC Sport"],
+  ["https://www.theguardian.com/football/world-cup-2026/rss", "The Guardian"],
 ];
 
 function positiveEnv(name: string, fallback: number): number {
@@ -217,7 +217,7 @@ function publishedIso(raw: string): string {
 export function parseRss(xml: string, source: string): NewsArticle[] {
   const items = xml.match(/<item[\s\S]*?<\/item>/gi) || [];
   const out: NewsArticle[] = [];
-  for (const item of items.slice(0, 20)) {
+  for (const item of items.slice(0, 60)) {
     const title = decodeXml(firstTagValue(item, "title"));
     const url = canonicalUrl(
       firstTagValue(item, "link") || firstTagValue(item, "guid")
@@ -257,15 +257,30 @@ async function fetchRss(feed: string, source: string): Promise<NewsArticle[]> {
       },
     });
     if (!res.ok) throw new Error(`RSS ${res.status} ${feed}`);
-    return parseRss(await res.text(), source);
+    const body = await res.text();
+    const contentType = res.headers.get("content-type") || "";
+    const prefix = body.slice(0, 2_000);
+    if (
+      /text\/html/i.test(contentType) ||
+      /<!doctype\s+html|<html\b/i.test(prefix) ||
+      !/<(?:rss|rdf:RDF)\b/i.test(prefix)
+    ) {
+      throw new Error(`Invalid RSS document ${feed}`);
+    }
+    const articles = parseRss(body, source);
+    if (!articles.length) {
+      throw new Error(`RSS contained no usable items ${feed}`);
+    }
+    return articles;
   } finally {
     clearTimeout(timeout);
   }
 }
 
-function mergeArticles(articles: NewsArticle[]): NewsArticle[] {
+function mergeArticles(articles: NewsArticle[], now: number): NewsArticle[] {
   const seen = new Set<string>();
   return articles
+    .filter((article) => isCurrentWorldCupArticle(article, now))
     .filter((article) => {
       if (seen.has(article.url)) return false;
       seen.add(article.url);
@@ -275,12 +290,18 @@ function mergeArticles(articles: NewsArticle[]): NewsArticle[] {
     .slice(0, 40);
 }
 
-/** Keyless news - public RSS only (BBC + ESPN + Guardian sport). */
+/** Keyless news from the BBC and Guardian's World Cup-scoped RSS feeds. */
 export async function getWorldCupNews(opts?: {
   force?: boolean;
 }): Promise<NewsResult> {
-  if (cache && !opts?.force && Date.now() - cache.at < TTL_MS) {
-    return { articles: cache.articles, source: "rss", cached: true, stale: false };
+  const now = Date.now();
+  if (cache && !opts?.force && now - cache.at < TTL_MS) {
+    return {
+      articles: mergeArticles(cache.articles, now),
+      source: "rss",
+      cached: true,
+      stale: cache.stale,
+    };
   }
 
   const results = await Promise.allSettled(
@@ -301,14 +322,20 @@ export async function getWorldCupNews(opts?: {
     }
   });
 
-  if (!merged.length && cache?.articles.length) {
+  if (failedSources.size === FEEDS.length && cache) {
     getLogger().warn(
-      { ageMs: Date.now() - cache.at },
+      { ageMs: now - cache.at },
       "all rss feeds failed; serving stale cache"
     );
-    return { articles: cache.articles, source: "rss", cached: true, stale: true };
+    cache.stale = true;
+    return {
+      articles: mergeArticles(cache.articles, now),
+      source: "rss",
+      cached: true,
+      stale: true,
+    };
   }
-  if (!merged.length) {
+  if (failedSources.size === FEEDS.length) {
     throw new Error("All RSS feeds failed");
   }
 
@@ -318,8 +345,8 @@ export async function getWorldCupNews(opts?: {
       ...cache.articles.filter((article) => failedSources.has(article.source))
     );
   }
-  const articles = mergeArticles(merged);
-  cache = { at: Date.now(), articles };
+  const articles = mergeArticles(merged, now);
+  cache = { at: now, articles, stale: failedSources.size > 0 };
   return {
     articles,
     source: "rss",

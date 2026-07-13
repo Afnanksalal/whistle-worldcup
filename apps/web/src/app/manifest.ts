@@ -17,19 +17,19 @@ export default function manifest(): MetadataRoute.Manifest {
     categories: ["sports", "entertainment"],
     icons: [
       {
-        src: "/icons/whistle-192.png",
+        src: "/icons/whistle-192.png?v=20260714",
         sizes: "192x192",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/icons/whistle-512.png",
+        src: "/icons/whistle-512.png?v=20260714",
         sizes: "512x512",
         type: "image/png",
         purpose: "any",
       },
       {
-        src: "/icons/whistle-maskable-512.png",
+        src: "/icons/whistle-maskable-512.png?v=20260714",
         sizes: "512x512",
         type: "image/png",
         purpose: "maskable",
@@ -41,14 +41,26 @@ export default function manifest(): MetadataRoute.Manifest {
         short_name: "Matches",
         description: "Open the World Cup match board",
         url: "/",
-        icons: [{ src: "/icons/whistle-192.png", sizes: "192x192", type: "image/png" }],
+        icons: [
+          {
+            src: "/icons/whistle-192.png?v=20260714",
+            sizes: "192x192",
+            type: "image/png",
+          },
+        ],
       },
       {
         name: "Tournament",
         short_name: "Tournament",
         description: "Open fixtures, results, and group context",
         url: "/groups",
-        icons: [{ src: "/icons/whistle-192.png", sizes: "192x192", type: "image/png" }],
+        icons: [
+          {
+            src: "/icons/whistle-192.png?v=20260714",
+            sizes: "192x192",
+            type: "image/png",
+          },
+        ],
       },
     ],
   };

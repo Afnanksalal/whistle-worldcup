@@ -12,7 +12,7 @@ Whistle is a fan-facing World Cup prediction product: public and squad parimutue
 - **Keeper settlement** — only a canonical TxLINE final record with a sequence and non-empty validation payload may settle a market
 - **Squads** — invite-code private tables + PnL leaderboard
 - **Admin API** — settle / void / lock behind `ADMIN_API_KEY`
-- **News** — parallel, timed RSS aggregation with image extraction and stale-cache recovery
+- **News** — parallel, timed World Cup-scoped BBC and Guardian RSS with relevance filtering, image extraction, and stale-cache recovery
 - **Match intelligence** — evidence-gated deterministic signals plus an optional cached LLM summary
 - **Groups** — standings from finished fixtures with `group` metadata
 - **Anchor program** — escrow + settle/claim/void (optional until deployed)

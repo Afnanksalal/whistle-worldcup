@@ -78,7 +78,7 @@ export function HomeNews({ articles }: { articles: NewsArticle[] }) {
         <header className="home-news__header">
           <div>
             <p className="section-kicker">Latest</p>
-            <h2 id="home-news-title">Football news</h2>
+            <h2 id="home-news-title">World Cup news</h2>
           </div>
           <Link className="text-link" href="/news">
             All stories <span aria-hidden>→</span>
