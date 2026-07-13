@@ -21,18 +21,6 @@ type FixtureBoardProps = {
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
-function countdown(ts: number, now: number) {
-  const diff = ts - now;
-  if (diff <= 0) return "Kickoff due";
-  const minutes = Math.floor(diff / 60_000);
-  const days = Math.floor(minutes / 1_440);
-  const hours = Math.floor((minutes % 1_440) / 60);
-  const mins = minutes % 60;
-  if (days > 0) return `${days}d ${hours}h`;
-  if (hours > 0) return `${hours}h ${mins}m`;
-  return `${Math.max(1, mins)}m`;
-}
-
 function dayLabel(ts: number, now: number | null) {
   const match = new Date(ts);
   if (now === null) {
@@ -177,41 +165,41 @@ export function FixtureBoard({
                       year: "numeric",
                     })
                   : "Tournament live"}
-              </time>
+                </time>
             </div>
-            <p className="section-kicker">Matchday pools</p>
-            <h1 id="home-title">Every match. One clear call.</h1>
-            <p className="home-lede">
-              Pick a side before kickoff. Your share of the winning pool is paid after the
-              final whistle—then the next match is ready.
-            </p>
-            <div className="hero-actions">
-              <a className="btn btn-primary" href="#matches">
-                See the matches
-              </a>
-              <Link className="text-link" href="/positions">
-                Track my picks <span aria-hidden>↗</span>
-              </Link>
+            <div className="home-intro__title">
+              <p className="section-kicker">Today&apos;s matches</p>
+              <h1 id="home-title">Pick today&apos;s matches.</h1>
             </div>
-            <dl className="hero-facts">
-              <div>
-                <dt>Next kickoff</dt>
-                <dd>{upcoming[0] && now ? countdown(upcoming[0].kickoffTs, now) : live.length ? "Live now" : "TBC"}</dd>
+            <div className="home-intro__copy">
+              <p className="home-lede">
+                Choose before kickoff. Follow the score. See the pool settle at full time.
+              </p>
+              <div className="hero-actions">
+                <a className="btn btn-primary" href="#matches">
+                  View matches
+                </a>
+                <Link className="text-link" href="/positions">
+                  Track my picks <span aria-hidden>↗</span>
+                </Link>
               </div>
-              <div>
-                <dt>Open matches</dt>
-                <dd>{upcoming.length + live.length}</dd>
-              </div>
-              <div>
-                <dt>Pool format</dt>
-                <dd>Parimutuel</dd>
-              </div>
-            </dl>
+            </div>
           </div>
 
-          <div className="featured-wrap">
-            {featured ? (
-              <article className="featured-match">
+          <div className="matchday-banner">
+            <Image
+              className="matchday-banner__image"
+              src="/brand/pitch-banner.webp"
+              alt=""
+              fill
+              priority
+              sizes="(max-width: 900px) calc(100vw - 2rem), 1240px"
+              aria-hidden="true"
+            />
+            <div className="matchday-banner__shade" aria-hidden="true" />
+            <div className="featured-wrap">
+              {featured ? (
+                <article className="featured-match">
                 <div className="featured-topline">
                   <div>
                     <span className={`status-badge${matchStatusClass(featured.status)}`}>
@@ -307,28 +295,36 @@ export function FixtureBoard({
                 <Link className="featured-cta" href={`/match/${featured.id}`}>
                   Open match pool <span aria-hidden>→</span>
                 </Link>
-              </article>
-            ) : (
-              <div className="featured-match featured-empty">
-                <p className="section-kicker">Match feed</p>
-                {loading ? (
-                  <FootballLoader label="Loading the tournament…" inverse />
-                ) : (
-                  <>
-                    <h2>The next kickoff is being confirmed.</h2>
-                    <Image
-                      className="featured-empty-mascot"
-                      src="/brand/pip-mascot.png"
-                      alt=""
-                      width={1280}
-                      height={1280}
-                      aria-hidden="true"
-                    />
-                  </>
-                )}
-              </div>
-            )}
+                </article>
+              ) : (
+                <div className="featured-match featured-empty">
+                  <p className="section-kicker">Match feed</p>
+                  {loading ? (
+                    <FootballLoader label="Loading the tournament…" inverse />
+                  ) : (
+                    <>
+                      <h2>The next kickoff is being confirmed.</h2>
+                      <Image
+                        className="featured-empty-mascot"
+                        src="/brand/pip-mascot.png"
+                        alt=""
+                        width={1254}
+                        height={1254}
+                        aria-hidden="true"
+                      />
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
+
+          <ol className="match-flow" aria-label="From schedule to settlement">
+            <li><span>01</span>Schedule</li>
+            <li><span>02</span>Pick &amp; stake</li>
+            <li><span>03</span>Live</li>
+            <li><span>04</span>Settled at FT</li>
+          </ol>
         </div>
       </section>
 
@@ -350,8 +346,8 @@ export function FixtureBoard({
           <div className="source-notice" role="status">
             <span aria-hidden>i</span>
             <p>
-              <strong>Schedule preview.</strong> Live match verification is not connected, so
-              pools use play units and unverified results refund automatically.
+              <strong>Schedule preview.</strong> Picks use play units until live results are
+              connected; unsettled matches are refunded.
             </p>
           </div>
         )}

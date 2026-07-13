@@ -72,12 +72,15 @@ function ArticleImage({
           loading={featured ? "eager" : "lazy"}
           decoding="async"
           fetchPriority={featured ? "high" : "auto"}
+          referrerPolicy="no-referrer"
           onError={() => setImageFailed(true)}
         />
       ) : (
         <div className="news-image__fallback">
           <span className="news-image__fallback-mark">{sourceMonogram(article.source)}</span>
-          <span className="news-image__fallback-label">Matchday desk</span>
+          <span className="news-image__fallback-label">
+            {sourceLabel(article.source)} · Text report
+          </span>
         </div>
       )}
     </div>
@@ -178,8 +181,14 @@ export default function NewsClient({
     [activeSource, sortedArticles]
   );
 
-  const featuredArticle = filteredArticles[0];
-  const latestArticles = filteredArticles.slice(1);
+  const featuredArticle =
+    filteredArticles.slice(0, 12).find((article) => article.imageUrl) ||
+    filteredArticles[0];
+  const latestArticles = filteredArticles.filter(
+    (article) => article.id !== featuredArticle?.id
+  );
+  const visualArticles = latestArticles.filter((article) => article.imageUrl);
+  const headlineArticles = latestArticles.filter((article) => !article.imageUrl);
   const storyCountLabel = `${filteredArticles.length} ${
     filteredArticles.length === 1 ? "story" : "stories"
   }`;
@@ -299,13 +308,17 @@ export default function NewsClient({
               <p className="news-section-label">Top story</p>
               <article className="news-feature__story">
                 <a
-                  className="news-feature__link"
+                  className={`news-feature__link${
+                    featuredArticle.imageUrl ? "" : " is-text-only"
+                  }`}
                   href={featuredArticle.url}
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label={articleLinkLabel(featuredArticle)}
                 >
-                  <ArticleImage article={featuredArticle} featured />
+                  {featuredArticle.imageUrl && (
+                    <ArticleImage key={featuredArticle.id} article={featuredArticle} featured />
+                  )}
                   <div className="news-feature__content">
                     <StoryMeta article={featuredArticle} />
                     <h2 className="news-feature__title" id="featured-story-title">
@@ -337,33 +350,63 @@ export default function NewsClient({
                     Fresh context for the fixtures and teams in play.
                   </p>
                 </header>
-                <div className="news-grid">
-                  {latestArticles.map((article) => (
-                    <article className="news-card" key={article.id}>
-                      <a
-                        className="news-card__link"
-                        href={article.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        aria-label={articleLinkLabel(article)}
-                      >
-                        <ArticleImage article={article} />
-                        <div className="news-card__content">
-                          <StoryMeta article={article} />
-                          <h3 className="news-card__title">{article.title}</h3>
-                          {article.description && (
-                            <p className="news-card__description">{article.description}</p>
-                          )}
-                          <span className="news-story-cta news-card__cta">
-                            Read story
-                            <span className="news-story-cta__icon" aria-hidden="true">
-                              ↗
-                            </span>
-                          </span>
-                        </div>
-                      </a>
-                    </article>
-                  ))}
+                <div
+                  className={`news-report-layout${
+                    visualArticles.length === 0 ? " is-headlines-only" : ""
+                  }${headlineArticles.length === 0 ? " is-images-only" : ""}`}
+                >
+                  {visualArticles.length > 0 && (
+                    <div className="news-grid">
+                      {visualArticles.map((article) => (
+                        <article className="news-card" key={article.id}>
+                          <a
+                            className="news-card__link"
+                            href={article.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            aria-label={articleLinkLabel(article)}
+                          >
+                            <ArticleImage article={article} />
+                            <div className="news-card__content">
+                              <StoryMeta article={article} />
+                              <h3 className="news-card__title">{article.title}</h3>
+                              {article.description && (
+                                <p className="news-card__description">{article.description}</p>
+                              )}
+                              <span className="news-story-cta news-card__cta">
+                                Read story
+                                <span className="news-story-cta__icon" aria-hidden="true">
+                                  ↗
+                                </span>
+                              </span>
+                            </div>
+                          </a>
+                        </article>
+                      ))}
+                    </div>
+                  )}
+
+                  {headlineArticles.length > 0 && (
+                    <aside className="news-headline-rail" aria-labelledby="latest-headlines-title">
+                      <h3 id="latest-headlines-title">Latest headlines</h3>
+                      <ol>
+                        {headlineArticles.map((article) => (
+                          <li key={article.id}>
+                            <a
+                              href={article.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={articleLinkLabel(article)}
+                            >
+                              <StoryMeta article={article} />
+                              <strong>{article.title}</strong>
+                              <span aria-hidden>↗</span>
+                            </a>
+                          </li>
+                        ))}
+                      </ol>
+                    </aside>
+                  )}
                 </div>
               </section>
             )}

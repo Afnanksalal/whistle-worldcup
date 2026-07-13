@@ -84,9 +84,12 @@ export function Nav() {
         <div className="nav-shell">
           <div className="nav-leading">
             <Link href="/" className="brand" aria-label="Whistle home">
-              <BrandMark className="brand-logo" accessibleLabel={null} />
-              <span>Whistle</span>
-              <small>WORLD CUP 26</small>
+              <BrandMark
+                className="brand-logo"
+                variant="lockup"
+                accessibleLabel={null}
+                priority
+              />
             </Link>
             <nav className="nav-links" aria-label="Primary navigation">
               {links.map((link) => {
