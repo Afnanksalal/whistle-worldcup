@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
+import { useEffect, useState } from "react";
 import { useRuntime } from "../lib/runtime";
 import { BrandMark } from "./BrandMark";
 
@@ -73,6 +74,28 @@ function isActive(pathname: string, href: string) {
     : pathname === href || pathname.startsWith(`${href}/`);
 }
 
+function MountedWalletButton() {
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => setMounted(true), []);
+
+  if (!mounted) {
+    return (
+      <button
+        className="wallet-adapter-button wallet-adapter-button-trigger"
+        type="button"
+        aria-busy="true"
+        aria-label="Wallet controls loading"
+        disabled
+      >
+        Select Wallet
+      </button>
+    );
+  }
+
+  return <WalletMultiButton />;
+}
+
 export function Nav() {
   const pathname = usePathname();
   const { meta } = useRuntime();
@@ -113,7 +136,7 @@ export function Nav() {
               <span className="data-status-dot" aria-hidden />
               {dataIsLive ? "Live match feed" : "Schedule preview"}
             </span>
-            <WalletMultiButton />
+            <MountedWalletButton />
           </div>
         </div>
       </header>
