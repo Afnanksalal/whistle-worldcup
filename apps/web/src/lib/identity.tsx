@@ -31,6 +31,8 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
   const { meta } = useRuntime();
 
   const owner = publicKey?.toBase58() || null;
+  const canSignMessage = Boolean(signMessage);
+  const ready = Boolean(publicKey && (!meta.requireWalletAuth || canSignMessage));
 
   const withWalletAuth = useCallback(async (): Promise<Record<string, string>> => {
     if (!meta.requireWalletAuth) return {};
@@ -55,10 +57,10 @@ export function IdentityProvider({ children }: { children: ReactNode }) {
     () => ({
       owner,
       isConnected: !!publicKey,
-      ready: !!publicKey,
+      ready,
       withWalletAuth,
     }),
-    [owner, publicKey, withWalletAuth]
+    [owner, publicKey, ready, withWalletAuth]
   );
 
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
