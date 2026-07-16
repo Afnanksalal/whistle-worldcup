@@ -1,0 +1,11 @@
+services:
+  api:
+    environment:
+      STAKE_ASSET: USDC
+      SETTLEMENT_RAIL: onchain
+      ENABLE_ONCHAIN_SETTLEMENT: "true"
+      USDC_MINT: ${USDC_MINT:?Set USDC_MINT}
+      PLATFORM_FEE_BPS: ${PLATFORM_FEE_BPS:-250}
+      SOLANA_KEYPAIR_PATH: /run/secrets/whistle-authority.json
+    volumes:
+      - ${WHISTLE_AUTHORITY_FILE:?Set WHISTLE_AUTHORITY_FILE}:/run/secrets/whistle-authority.json:ro

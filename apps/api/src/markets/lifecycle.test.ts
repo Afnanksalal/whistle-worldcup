@@ -161,4 +161,21 @@ describe("market lifecycle safety", () => {
     assert.equal(state.markets.staked.status, "void");
     assert.ok(state.positions.p);
   });
+
+  it("keeps funded on-chain pools locked until the chain is voided first", () => {
+    const state = emptyState();
+    state.fixtures.cancelled = fixture("cancelled", "cancelled", NOW - 1);
+    state.markets.m = market("m", "cancelled", 12);
+    state.positions.p = position("p", "m", 12);
+
+    const result = reconcileStateMarkets(state, {
+      now: NOW,
+      resultVerificationAvailable: false,
+      deferStakedVoids: true,
+    });
+
+    assert.equal(state.markets.m.status, "locked");
+    assert.equal(result.voided, 0);
+    assert.equal(result.locked, 1);
+  });
 });

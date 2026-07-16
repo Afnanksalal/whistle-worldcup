@@ -16,7 +16,9 @@
     "start:api": "npm run start -w @whistle/api",
     "lint": "npm run lint -w @whistle/web --if-present",
     "check": "npm run build:shared && npm test && npm test -w @whistle/api",
-    "check:seo": "node apps/web/scripts/seo-smoke.mjs"
+    "check:seo": "npm run build:shared && node apps/web/scripts/seo-smoke-runner.mjs",
+    "init:program": "node --experimental-vm-modules scripts/init-program.js",
+    "settle:market": "node --experimental-vm-modules scripts/settle-market.js"
   },
   "engines": {
     "node": ">=22.12"

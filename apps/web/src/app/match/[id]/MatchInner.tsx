@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { Fixture, MatchForecast } from "@whistle/shared";
+import type { Fixture, MarketOutcome, MatchForecast } from "@whistle/shared";
 import { impliedShares } from "@whistle/shared";
 import { api, statusLabel } from "../../../lib/api";
 import { useIdentity } from "../../../lib/identity";
@@ -19,6 +19,7 @@ import { TeamCrest } from "../../../components/TeamCrest";
 import { FootballLoader } from "../../../components/FootballLoader";
 import { ForecastPanel } from "../../../components/ForecastPanel";
 import type { MatchDetail } from "../../../lib/match-detail";
+import { useSolanaTransactions } from "../../../lib/solana";
 
 const OUTCOME_LABELS: Record<string, string> = {
   home: "Home win",
@@ -47,6 +48,7 @@ export default function MatchPageInner({
 }) {
   const { owner, ready, withWalletAuth } = useIdentity();
   const { stakeLabel, meta } = useRuntime();
+  const { deposit: depositOnchain } = useSolanaTransactions();
   const timeContext = useLocalTimeContext();
   const [data, setData] = useState<MatchDetail | null>(initialDetail);
   const [now, setNow] = useState<number | null>(initialDetail.serverNow ?? null);
@@ -142,15 +144,38 @@ export default function MatchPageInner({
     setBusy(true);
     setNotice(null);
     try {
+      let txSignature: string | undefined = undefined;
       const headers = await withWalletAuth();
+      const outcome = selectedOutcome as MarketOutcome;
+
+      if (meta.settlementRail === "onchain") {
+        if (!meta.whistleProgramId || !meta.usdcMint) {
+          throw new Error("On-chain staking configuration is unavailable");
+        }
+        await api(`/markets/${market.id}/prepare`, { method: "POST" });
+
+        txSignature = await depositOnchain({
+          programId: meta.whistleProgramId,
+          usdcMint: meta.usdcMint,
+          fixtureId: data!.fixture.id,
+          marketType: market.marketType,
+          line: market.line,
+          squadId: market.squadId,
+          outcome,
+          amount,
+        });
+      }
+
       await api(`/markets/${market.id}/deposit`, {
         method: "POST",
         headers,
-        body: JSON.stringify({ outcome: selectedOutcome, amount, owner }),
+        body: JSON.stringify({ outcome: selectedOutcome, amount, owner, txSignature }),
       });
       setNotice({
         tone: "success",
-        text: `${amount} ${stakeLabel} confirmed on ${outcomeName(selectedOutcome, data!.fixture)}.`,
+        text: txSignature
+          ? `${amount} ${stakeLabel} transaction confirmed: ${txSignature.slice(0, 8)}...`
+          : `${amount} ${stakeLabel} confirmed on ${outcomeName(selectedOutcome, data!.fixture)}.`,
       });
       await load();
     } catch (cause) {

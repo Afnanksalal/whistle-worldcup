@@ -16,6 +16,9 @@ export type AppMeta = {
   network: string;
   settlementRail: "ledger" | "onchain";
   stakeAsset: "USDC" | "units";
+  whistleProgramId: string | null;
+  usdcMint: string | null;
+  platformFeeBps: number;
   requireWalletAuth: boolean;
   txlineConfigured: boolean;
   fixtureSource?: "txline" | "thesportsdb";
@@ -28,6 +31,9 @@ const defaultMeta: AppMeta = {
   network: "devnet",
   settlementRail: "ledger",
   stakeAsset: "units",
+  whistleProgramId: null,
+  usdcMint: null,
+  platformFeeBps: 0,
   requireWalletAuth: true,
   txlineConfigured: false,
   fixtureSource: "thesportsdb",

@@ -2,7 +2,7 @@
 
 ## Idea
 
-Whistle is a fan-facing World Cup prediction product: public and squad parimutuel pools that move through schedule → stake → live → settled/paid or refund → next kickoff. The current deployment is an authenticated play-unit ledger. Real-value/on-chain mode fails closed until the Anchor client and TxLINE CPI path are complete.
+Whistle is a fan-facing World Cup prediction product: public and squad parimutuel pools that move through schedule → stake → live → settled/paid or refund → next kickoff. The default deployment is an authenticated play-unit ledger. An optional USDC rail fails closed unless its deployed Anchor program and TxLINE-backed keeper are fully configured and startup-verified.
 
 ## Highlights
 
@@ -40,7 +40,10 @@ Browser → Next.js (VPS) → Caddy → Whistle API
 | Node.js | `>=22.12`; production images use Node 22 |
 | `GROQ_API_KEY` | Optional, server-only forecast/insight narrative enrichment; deterministic output remains available without it |
 | `GROQ_MODEL` | Optional; defaults to `openai/gpt-oss-20b` with low reasoning effort and strict forecast-note JSON |
-| `SETTLEMENT_RAIL` / `STAKE_ASSET` | Must remain `ledger` / `units`; unsupported real-value settings fail boot |
+| `SETTLEMENT_RAIL` / `STAKE_ASSET` | Default `ledger` / `units`. USDC requires `onchain` / `USDC` plus `ENABLE_ONCHAIN_SETTLEMENT=true` |
+| `WHISTLE_PROGRAM_ID` / `USDC_MINT` | Required in on-chain mode and checked against deployed accounts at boot |
+| `WHISTLE_AUTHORITY_KEY` / `SOLANA_KEYPAIR_PATH` | Exactly one usable keeper authority source is required in on-chain mode |
+| `PLATFORM_FEE_BPS` | On-chain fee, default 250 and hard-capped at 1000; must match the config PDA |
 
 ## TxLINE endpoints (when live)
 
@@ -68,6 +71,7 @@ Networks: **devnet** `https://txline-dev.txodds.com` or **mainnet** free tiers.
 | `GET /api/admin/overview` | Admin key required |
 | `POST /api/markets/:id/settle\|void\|lock` | Admin key required |
 | `POST /api/markets/:id/deposit` | Wallet identity |
+| `POST /api/markets/:id/prepare` | Lazily creates the deterministic market/vault PDAs before an on-chain stake |
 
 Provider kickoffs accept only plausible epoch seconds/milliseconds or zoned ISO
 timestamps with real calendar fields. Missing, offset-less, impossible, and
@@ -137,6 +141,8 @@ silently publish localhost or query-string canonicals.
 - **Void / refund:** cancelled/postponed → void open|locked; claim refunds stake
 - **Fallback result:** a non-TxLINE final can never settle; affected open/locked pools void and refund
 - **Uniqueness:** deterministic market identity covers fixture, type, line, and squad across every lifecycle status
+- **On-chain cutoff:** the market account stores kickoff and rejects direct deposits at or after kickoff
+- **Replay safety:** a transaction signature is idempotent and cannot credit the JSON ledger twice
 - Shared helpers in `@whistle/shared`
 
 ## Market lifecycle
@@ -148,7 +154,7 @@ open|locked → (cancel/postpone) void → refund claim
 
 ## Current production boundary
 
-Boot reconciliation removes only empty duplicate/orphan pools and preserves every pool with a position or liquidity. Financial mutations use durable atomic writes; background snapshots coalesce and unchanged chart samples are skipped. This is safer for the competition deployment, but it is intentionally single-process and is not suitable for horizontal replicas or real money. The next scaling step is PostgreSQL transactions plus a complete generated Anchor client, not additional JSON-ledger complexity.
+Boot reconciliation removes only empty duplicate/orphan pools and preserves every pool with a position or liquidity. In on-chain mode, funded pools stay locked until settle/void succeeds on-chain; the API never advertises a paid/refunded state first. Financial mutations use durable atomic writes; background snapshots coalesce and unchanged chart samples are skipped. The JSON ledger remains intentionally single-process and is not suitable for horizontal replicas. PostgreSQL transactions are the next scaling step.
 
 ## Feedback (TxLINE)
 

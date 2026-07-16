@@ -13,11 +13,24 @@ import {
   marketImplied,
   positionsForOwner,
   squadLeaderboard,
-  voidMarket,
-  voidMarketsForFixture,
+  voidMarketWithRail,
+  voidMarketsForFixtureWithRail,
 } from "./markets/service";
 import { maybeSettleFixture } from "./settlement/keeper";
-import type { Fixture } from "@whistle/shared";
+import {
+  amountToBaseUnits,
+  outcomeToU8,
+  type Fixture,
+  type MarketOutcome,
+} from "@whistle/shared";
+import { Connection, PublicKey } from "@solana/web3.js";
+import {
+  deriveMarketPDA,
+  ensureMarketOnchain,
+  verifyClaimTx,
+  verifyDepositTx,
+} from "./settlement/onchain";
+import { isFixtureStakeable } from "./markets/lifecycle";
 import type { AppConfig } from "./config";
 import { publicMeta } from "./config";
 import { issueChallenge, requireAdmin, requireWalletOwner } from "./auth";
@@ -299,20 +312,76 @@ export function createRouter(cfg: AppConfig) {
     }
   });
 
-  router.post("/markets/:id/deposit", walletOwner, (req, res) => {
+  router.post("/markets/:id/prepare", async (req, res) => {
+    if (!cfg.onchainSettlementEnabled || !cfg.whistleProgramId || !cfg.usdcMint) {
+      return res.status(409).json({ error: "on-chain staking is not enabled" });
+    }
+    const market = getState().markets[req.params.id];
+    if (!market) return res.status(404).json({ error: "market not found" });
+    const fixture = getState().fixtures[market.fixtureId];
+    if (market.status !== "open" || !isFixtureStakeable(fixture)) {
+      return res.status(409).json({ error: "market is closed" });
+    }
+    try {
+      const prepared = await ensureMarketOnchain(market, fixture.kickoffTs);
+      res.json({
+        ...prepared,
+        programId: cfg.whistleProgramId,
+        usdcMint: cfg.usdcMint,
+      });
+    } catch (error) {
+      req.log?.error({ err: error, marketId: market.id }, "on-chain market preparation failed");
+      res.status(503).json({ error: "on-chain market could not be prepared" });
+    }
+  });
+
+  router.post("/markets/:id/deposit", walletOwner, async (req, res) => {
     const schema = z.object({
       outcome: z.string(),
       amount: z.number().positive().max(1_000_000),
       owner: z.string().min(1),
+      txSignature: z.string().optional(),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json(parsed.error.flatten());
     try {
+      const market = getState().markets[req.params.id];
+      if (!market) return res.status(404).json({ error: "market not found" });
+
+      if (cfg.onchainSettlementEnabled) {
+        if (!parsed.data.txSignature) {
+          return res.status(400).json({ error: "txSignature required for on-chain deposit" });
+        }
+        const connection = new Connection(cfg.solanaRpcUrl, "confirmed");
+        const programId = new PublicKey(cfg.whistleProgramId!);
+        const marketPda = deriveMarketPDA(
+          programId,
+          market.fixtureId,
+          market.marketType,
+          market.line,
+          market.squadId
+        );
+        const userPubKey = new PublicKey(parsed.data.owner);
+        const outcome = parsed.data.outcome as MarketOutcome;
+        const outcomeU8 = outcomeToU8(market.marketType, outcome);
+
+        await verifyDepositTx({
+          connection,
+          programId,
+          txSig: parsed.data.txSignature,
+          expectedMarket: marketPda,
+          expectedUser: userPubKey,
+          expectedOutcome: outcomeU8,
+          expectedAmountBaseUnits: amountToBaseUnits(parsed.data.amount),
+        });
+      }
+
       const result = deposit({
         marketId: req.params.id,
-        outcome: parsed.data.outcome as never,
+        outcome: parsed.data.outcome as MarketOutcome,
         amount: parsed.data.amount,
         owner: parsed.data.owner,
+        txSignature: parsed.data.txSignature,
       });
       bumpMetric("deposits");
       res.json(result);
@@ -346,25 +415,37 @@ export function createRouter(cfg: AppConfig) {
     res.json({ market: updated, settlement: attempt });
   });
 
-  router.post("/markets/:id/void", admin, (req, res) => {
+  router.post("/markets/:id/void", admin, async (req, res) => {
     const schema = z.object({ reason: z.string().optional() });
     const parsed = schema.safeParse(req.body ?? {});
     if (!parsed.success) return res.status(400).json(parsed.error.flatten());
     try {
       bumpMetric("voids");
       res.json({
-        market: voidMarket(req.params.id, parsed.data.reason || "match abandoned"),
+        market: await voidMarketWithRail(
+          req.params.id,
+          parsed.data.reason || "match abandoned",
+          cfg.onchainSettlementEnabled
+        ),
       });
     } catch (e) {
       res.status(400).json({ error: String(e) });
     }
   });
 
-  router.post("/fixtures/:id/void-markets", admin, (req, res) => {
+  router.post("/fixtures/:id/void-markets", admin, async (req, res) => {
     const reason = String(req.body?.reason || "fixture cancelled");
-    const markets = voidMarketsForFixture(req.params.id, reason);
-    bumpMetric("voids", markets.length);
-    res.json({ markets });
+    try {
+      const markets = await voidMarketsForFixtureWithRail(
+        req.params.id,
+        reason,
+        cfg.onchainSettlementEnabled
+      );
+      bumpMetric("voids", markets.length);
+      res.json({ markets });
+    } catch (error) {
+      res.status(409).json({ error: error instanceof Error ? error.message : String(error) });
+    }
   });
 
   router.post("/markets/:id/lock", admin, (req, res) => {
@@ -375,12 +456,51 @@ export function createRouter(cfg: AppConfig) {
     }
   });
 
-  router.post("/positions/:id/claim", walletOwner, (req, res) => {
-    const schema = z.object({ owner: z.string() });
+  router.post("/positions/:id/claim", walletOwner, async (req, res) => {
+    const schema = z.object({
+      owner: z.string(),
+      txSignature: z.string().optional(),
+    });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json(parsed.error.flatten());
     try {
-      res.json(claimPosition(req.params.id, parsed.data.owner));
+      const position = getState().positions[req.params.id];
+      if (!position) return res.status(404).json({ error: "position not found" });
+      const market = getState().markets[position.marketId];
+      if (!market) return res.status(404).json({ error: "market not found" });
+
+      if (cfg.onchainSettlementEnabled) {
+        if (!parsed.data.txSignature) {
+          return res.status(400).json({ error: "txSignature required for on-chain claim" });
+        }
+        const connection = new Connection(cfg.solanaRpcUrl, "confirmed");
+        const programId = new PublicKey(cfg.whistleProgramId!);
+        const marketPda = deriveMarketPDA(
+          programId,
+          market.fixtureId,
+          market.marketType,
+          market.line,
+          market.squadId
+        );
+        const userPubKey = new PublicKey(parsed.data.owner);
+
+        await verifyClaimTx({
+          connection,
+          programId,
+          txSig: parsed.data.txSignature,
+          expectedMarket: marketPda,
+          expectedUser: userPubKey,
+        });
+      }
+
+      res.json(
+        claimPosition(
+          req.params.id,
+          parsed.data.owner,
+          parsed.data.txSignature,
+          cfg.onchainSettlementEnabled ? cfg.platformFeeBps : 0
+        )
+      );
     } catch (e) {
       res.status(400).json({ error: String(e) });
     }

@@ -25,7 +25,7 @@ Powered by [TxLINE](https://txline.txodds.com) sports data on Solana (with free 
 apps/web          Next.js product UI (VPS only)
 apps/api          Ingest, markets, keeper, WS, news, groups, admin API
 packages/shared   Shared types + resolution helpers
-programs/whistle  Anchor escrow prototype (not enabled in production)
+programs/whistle  Guarded Anchor escrow + settle/claim/refund rail
 infra/playground  Docker Compose + Caddy production stack
 docs/             TECH, DEPLOY, DEMO, SUBMISSION, TASKS
 ```
@@ -54,12 +54,21 @@ There is **no demo mode**. `DEMO_MODE` / `ALLOW_SANDBOX` crash boot if set.
 
 ### On-chain program
 
+Play-unit ledger mode is the default. USDC mode is an explicit deployment option
+and requires a real TxLINE token, a deployed and initialized program, and an
+authority keypair. The API verifies that the deployed program, config PDA,
+authority, mint, and fee all agree before it starts.
+
 ```bash
 anchor build
 anchor deploy --provider.cluster devnet
+npm run init:program -- --fee-bps 250
 ```
 
-Set `WHISTLE_PROGRAM_ID` when the program is live.
+Set `ENABLE_ONCHAIN_SETTLEMENT=true`, `SETTLEMENT_RAIL=onchain`,
+`STAKE_ASSET=USDC`, `WHISTLE_PROGRAM_ID`, `USDC_MINT`, and the mounted authority
+keypair only after deployment. Browser clients receive the public program and
+mint addresses from `/api/meta`.
 
 ## Scripts
 

@@ -9,12 +9,6 @@ import {
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
 import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
-import { CoinbaseWalletAdapter } from "@solana/wallet-adapter-coinbase";
-import { LedgerWalletAdapter } from "@solana/wallet-adapter-ledger";
-import { TorusWalletAdapter } from "@solana/wallet-adapter-torus";
-import { TrustWalletAdapter } from "@solana/wallet-adapter-trust";
-import { XDEFIWalletAdapter } from "@solana/wallet-adapter-xdefi";
-import { SafePalWalletAdapter } from "@solana/wallet-adapter-safepal";
 import { IdentityProvider } from "../lib/identity";
 import { RuntimeProvider } from "../lib/runtime";
 
@@ -24,16 +18,7 @@ export function Providers({ children }: { children: ReactNode }) {
     []
   );
   const wallets = useMemo(
-    () => [
-      new PhantomWalletAdapter(),
-      new SolflareWalletAdapter(),
-      new CoinbaseWalletAdapter(),
-      new LedgerWalletAdapter(),
-      new TorusWalletAdapter(),
-      new TrustWalletAdapter(),
-      new XDEFIWalletAdapter(),
-      new SafePalWalletAdapter(),
-    ],
+    () => [new PhantomWalletAdapter(), new SolflareWalletAdapter()],
     []
   );
   const onWalletError = useCallback((error: WalletError) => {

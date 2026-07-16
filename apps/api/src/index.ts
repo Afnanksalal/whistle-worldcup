@@ -28,6 +28,10 @@ import { configureLogger, getLogger } from "./observability";
 import { snapshotAllOpenMarkets, recordMarketPrice } from "./markets/prices";
 import { refreshLiveFixtureStats } from "./match/stats";
 import { buildInsights } from "./insights";
+import {
+  validateOnchainDeployment,
+  validateOnchainLedgerState,
+} from "./settlement/onchain";
 
 dotenv.config({ path: path.resolve(process.cwd(), ".env") });
 dotenv.config({ path: path.resolve(process.cwd(), "../../.env") });
@@ -37,6 +41,8 @@ async function main() {
   const cfg = loadConfig();
   configureLogger(cfg.logLevel);
   const log = getLogger();
+  if (cfg.onchainSettlementEnabled) validateOnchainLedgerState(getState());
+  await validateOnchainDeployment(cfg);
 
   const net = networkConfig(cfg.network);
   const apiOrigin = cfg.apiOrigin || net.apiOrigin;
@@ -64,7 +70,11 @@ async function main() {
   const verifiedTxlineConfig = () =>
     !placeholder && getFixtureSource() === "txline" ? txlineCfg : null;
   const syncKeeperConfig = () =>
-    configureKeeper(verifiedTxlineConfig(), cfg.keepSettleEnabled);
+    configureKeeper(
+      verifiedTxlineConfig(),
+      cfg.keepSettleEnabled,
+      cfg.onchainSettlementEnabled
+    );
   const ensureScheduledMarkets = () => {
     for (const fixture of Object.values(getState().fixtures)) {
       if (!isFixtureStakeable(fixture)) continue;
@@ -81,6 +91,7 @@ async function main() {
   const reconcileLifecycle = () => {
     const summary = reconcileMarkets({
       resultVerificationAvailable: Boolean(verifiedTxlineConfig()),
+      deferStakedVoids: cfg.onchainSettlementEnabled,
     });
     if (summary.deleted || summary.voided || summary.locked) {
       log.warn({ summary }, "market lifecycle state reconciled");
