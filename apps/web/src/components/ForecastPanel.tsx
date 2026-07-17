@@ -137,6 +137,32 @@ export function ForecastPanel({
         ))}
       </div>
 
+      {!!forecast.model.factors?.length && !isFinal && (
+        <div className="forecast-factors" aria-label="Forecast factor breakdown">
+          <div className="forecast-factors-heading">
+            <strong>How the read is built</strong>
+            <span>Weights re-scale when a feed is missing — injuries stay at 0 until a real source exists.</span>
+          </div>
+          <ul>
+            {forecast.model.factors.map((factor) => (
+              <li key={factor.id} className={factor.available ? "is-available" : "is-missing"}>
+                <div>
+                  <strong>{factor.label}</strong>
+                  <span>
+                    {Math.round(factor.appliedWeight * 100)}/{Math.round(factor.weight * 100)}%
+                    {factor.available ? ` · tilts ${factor.tilt}` : " · unavailable"}
+                  </span>
+                </div>
+                <p>{factor.detail}</p>
+                <i aria-hidden="true">
+                  <span style={{ width: `${Math.round(factor.appliedWeight * 100)}%` }} />
+                </i>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {!isFinal && <div className="forecast-chart-block">
         <div className="forecast-chart-heading">
           <div>

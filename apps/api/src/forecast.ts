@@ -4,6 +4,7 @@ import type {
   CrowdPriceSnapshot,
   Fixture,
   ForecastEvidence,
+  ForecastFactor,
   ForecastFreshness,
   ForecastNarrative,
   ForecastProbabilities,
@@ -22,11 +23,16 @@ import {
   getPublicForecastHistory,
 } from "./forecastHistory";
 
-const MODEL_VERSION = "whistle-poisson-v1" as const;
+const MODEL_VERSION = "whistle-poisson-v2" as const;
 const NEUTRAL_GOALS_PER_TEAM = 1.25;
 const FORM_MATCH_LIMIT = 8;
 const GOAL_ENUMERATION_LIMIT = 10;
 const PROBABILITY_SCALE = 1_000_000;
+/** Soft H2H blend into λ when enough meetings exist (caps at 15%). */
+const H2H_BLEND_PER_MATCH = 0.05;
+const H2H_BLEND_CAP = 0.15;
+/** Venue-specific form share when enough home/away samples exist. */
+const VENUE_FORM_WEIGHT = 0.6;
 const MAX_CACHE_ENTRIES = 256;
 const DEFAULT_GROQ_MODEL = "openai/gpt-oss-20b";
 const GroqForecastNoteSchema = z
@@ -100,14 +106,32 @@ function teamKey(team: Fixture["home"]): string {
 function sameTeam(a: Fixture["home"], b: Fixture["home"]): boolean {
   const aKey = teamKey(a);
   const bKey = teamKey(b);
-  if (aKey.startsWith("id:") && bKey.startsWith("id:")) return aKey === bKey;
+  // Same provider id is enough, but cross-provider history (TxLINE vs TheSportsDB)
+  // must still match on team name when ids differ.
+  if (aKey.startsWith("id:") && bKey.startsWith("id:") && aKey === bKey) return true;
   return a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) === 0;
 }
 
 function sameCompetition(candidate?: string, target?: string): boolean {
   if (!target) return true;
   if (!candidate) return false;
-  return candidate.localeCompare(target, undefined, { sensitivity: "base" }) === 0;
+  if (candidate.localeCompare(target, undefined, { sensitivity: "base" }) === 0) {
+    return true;
+  }
+  const norm = (value: string) =>
+    value
+      .normalize("NFKD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  const a = norm(candidate);
+  const b = norm(target);
+  if (a.includes(b) || b.includes(a)) return true;
+  // Treat "World Cup" / "FIFA World Cup" as the same competition family.
+  if (a.includes("world cup") && b.includes("world cup")) return true;
+  if (a.includes("friendl") && b.includes("friendl")) return true;
+  return false;
 }
 
 function normalizeProbabilities(values: ForecastProbabilities): ForecastProbabilities {
@@ -188,9 +212,20 @@ function completedHistory(
     .slice(0, competitionOnly ? 64 : 256);
 }
 
-function formFor(team: Fixture["home"], history: Fixture[]): TeamForm {
+function formFor(
+  team: Fixture["home"],
+  history: Fixture[],
+  venue: "any" | "home" | "away" = "any"
+): TeamForm {
   const matches = history
-    .filter((fixture) => sameTeam(team, fixture.home) || sameTeam(team, fixture.away))
+    .filter((fixture) => {
+      const atHome = sameTeam(team, fixture.home);
+      const atAway = sameTeam(team, fixture.away);
+      if (!atHome && !atAway) return false;
+      if (venue === "home") return atHome;
+      if (venue === "away") return atAway;
+      return true;
+    })
     .slice(0, FORM_MATCH_LIMIT);
   const form: TeamForm = {
     matches: 0,
@@ -211,6 +246,26 @@ function formFor(team: Fixture["home"], history: Fixture[]): TeamForm {
     form.latestAt = Math.max(form.latestAt || 0, fixture.kickoffTs);
   }
   return form;
+}
+
+function blendForms(primary: TeamForm, secondary: TeamForm, primaryWeight: number): TeamForm {
+  if (!primary.matches) return secondary;
+  if (!secondary.matches) return primary;
+  const w = clamp(primaryWeight, 0, 1);
+  const matches = Math.max(1, Math.round(primary.matches * w + secondary.matches * (1 - w)));
+  return {
+    matches,
+    goalsFor: primary.goalsFor * w + secondary.goalsFor * (1 - w),
+    goalsAgainst: primary.goalsAgainst * w + secondary.goalsAgainst * (1 - w),
+    points: primary.points * w + secondary.points * (1 - w),
+    latestAt: Math.max(primary.latestAt || 0, secondary.latestAt || 0) || null,
+  };
+}
+
+function factorTilt(homeEdge: number): ForecastFactor["tilt"] {
+  if (homeEdge > 0.08) return "home";
+  if (homeEdge < -0.08) return "away";
+  return "draw";
 }
 
 function headToHeadFixtures(input: ForecastInput, history: Fixture[]): Fixture[] {
@@ -365,8 +420,12 @@ export function buildDeterministicForecast(
 ): MatchModelForecast {
   const history = completedHistory(input, now);
   const competitionHistory = completedHistory(input, now, true);
-  const homeForm = formFor(input.fixture.home, history);
-  const awayForm = formFor(input.fixture.away, history);
+  const homeOverall = formFor(input.fixture.home, history);
+  const awayOverall = formFor(input.fixture.away, history);
+  const homeVenue = formFor(input.fixture.home, history, "home");
+  const awayVenue = formFor(input.fixture.away, history, "away");
+  const homeForm = blendForms(homeVenue, homeOverall, VENUE_FORM_WEIGHT);
+  const awayForm = blendForms(awayVenue, awayOverall, VENUE_FORM_WEIGHT);
   const headToHead = headToHeadFixtures(input, history);
   const scored = competitionHistory.filter((fixture) => fixture.score);
   const totalHomeGoals = scored.reduce((sum, fixture) => sum + (fixture.score?.home || 0), 0);
@@ -383,15 +442,134 @@ export function buildDeterministicForecast(
   const formPrior = 3;
   const attack = (form: TeamForm) =>
     ((form.goalsFor + formPrior * competitionAverage) /
-      (form.matches + formPrior)) /
+      (Math.max(form.matches, 0) + formPrior)) /
     competitionAverage;
   const defence = (form: TeamForm) =>
     ((form.goalsAgainst + formPrior * competitionAverage) /
-      (form.matches + formPrior)) /
+      (Math.max(form.matches, 0) + formPrior)) /
     competitionAverage;
 
-  let homeLambda = clamp(baseHome * attack(homeForm) * defence(awayForm), 0.2, 4);
-  let awayLambda = clamp(baseAway * attack(awayForm) * defence(homeForm), 0.2, 4);
+  const homeAttack = attack(homeForm);
+  const awayAttack = attack(awayForm);
+  const homeDefence = defence(homeForm);
+  const awayDefence = defence(awayForm);
+  let homeLambda = clamp(baseHome * homeAttack * awayDefence, 0.2, 4);
+  let awayLambda = clamp(baseAway * awayAttack * homeDefence, 0.2, 4);
+
+  let homeWins = 0;
+  let draws = 0;
+  let awayWins = 0;
+  let h2hHomeGoals = 0;
+  let h2hAwayGoals = 0;
+  let h2hSample = 0;
+  for (const fixture of headToHead) {
+    if (!fixture.score) continue;
+    const targetHomeWasHome = sameTeam(input.fixture.home, fixture.home);
+    const targetHomeGoals = targetHomeWasHome ? fixture.score.home : fixture.score.away;
+    const targetAwayGoals = targetHomeWasHome ? fixture.score.away : fixture.score.home;
+    h2hHomeGoals += targetHomeGoals;
+    h2hAwayGoals += targetAwayGoals;
+    h2hSample += 1;
+    if (targetHomeGoals > targetAwayGoals) homeWins += 1;
+    else if (targetHomeGoals < targetAwayGoals) awayWins += 1;
+    else draws += 1;
+  }
+
+  let h2hBlend = 0;
+  if (h2hSample >= 2) {
+    h2hBlend = clamp(h2hSample * H2H_BLEND_PER_MATCH, 0, H2H_BLEND_CAP);
+    const h2hHomeLambda = clamp(h2hHomeGoals / h2hSample, 0.2, 4);
+    const h2hAwayLambda = clamp(h2hAwayGoals / h2hSample, 0.2, 4);
+    homeLambda = homeLambda * (1 - h2hBlend) + h2hHomeLambda * h2hBlend;
+    awayLambda = awayLambda * (1 - h2hBlend) + h2hAwayLambda * h2hBlend;
+  }
+
+  const historySource =
+    input.fixtureSource === "txline"
+      ? "TxLINE + TheSportsDB history (forecast only)"
+      : "TheSportsDB fixture history";
+
+  const formAvailable = homeOverall.matches > 0 && awayOverall.matches > 0;
+  const venueAvailable = homeVenue.matches > 0 || awayVenue.matches > 0;
+  const h2hAvailable = h2hSample >= 2;
+  const attackEdge = homeAttack * awayDefence - awayAttack * homeDefence;
+  const formEdge =
+    (homeForm.points / Math.max(homeForm.matches, 1) -
+      awayForm.points / Math.max(awayForm.matches, 1)) /
+    3;
+  const venueEdge = baseHome - baseAway;
+  const h2hEdge =
+    h2hSample > 0 ? (homeWins - awayWins) / Math.max(h2hSample, 1) : 0;
+
+  const factors: ForecastFactor[] = [
+    {
+      id: "recent_form",
+      label: "Recent form",
+      weight: 0.3,
+      appliedWeight: formAvailable ? 0.3 : 0,
+      available: formAvailable,
+      tilt: formAvailable ? factorTilt(formEdge) : "neutral",
+      detail: formAvailable
+        ? `${input.fixture.home.name} ${rounded(homeForm.goalsFor)}/${rounded(homeForm.goalsAgainst)} GF/GA over ${homeOverall.matches} · ${input.fixture.away.name} ${rounded(awayForm.goalsFor)}/${rounded(awayForm.goalsAgainst)} over ${awayOverall.matches}`
+        : "Not enough completed recent matches for either side.",
+      sampleSize: Math.min(homeOverall.matches, awayOverall.matches) || undefined,
+    },
+    {
+      id: "home_away",
+      label: "Home / away",
+      weight: 0.2,
+      appliedWeight: venueAvailable || sample > 0 ? 0.2 : 0.08,
+      available: venueAvailable || sample > 0,
+      tilt: factorTilt(venueEdge),
+      detail: venueAvailable
+        ? `Venue-split form used (${Math.round(VENUE_FORM_WEIGHT * 100)}% weight). Competition home baseline ${rounded(baseHome)} xG vs away ${rounded(baseAway)} xG.`
+        : `Competition venue baselines only (${rounded(baseHome)} / ${rounded(baseAway)} xG); team-specific venue samples are thin.`,
+      sampleSize: homeVenue.matches + awayVenue.matches || sample || undefined,
+    },
+    {
+      id: "head_to_head",
+      label: "Head-to-head",
+      weight: 0.15,
+      appliedWeight: h2hAvailable ? h2hBlend : 0,
+      available: h2hAvailable,
+      tilt: h2hSample ? factorTilt(h2hEdge) : "neutral",
+      detail: h2hSample
+        ? `${h2hSample} meetings: ${input.fixture.home.name} ${homeWins}W-${draws}D-${awayWins}L${h2hAvailable ? ` · ${Math.round(h2hBlend * 100)}% soft blend into xG` : " · need 2+ to move xG"}`
+        : "No completed head-to-head meetings in the forecast evidence.",
+      sampleSize: h2hSample || undefined,
+    },
+    {
+      id: "attack_defense",
+      label: "Attack vs defense",
+      weight: 0.2,
+      appliedWeight: formAvailable ? 0.2 : 0.05,
+      available: formAvailable,
+      tilt: formAvailable ? factorTilt(attackEdge) : "neutral",
+      detail: formAvailable
+        ? `Attack/defence indices → λ ${rounded(homeLambda)} / ${rounded(awayLambda)} before live adjustments.`
+        : "Attack/defence indices stay near the competition prior until both teams have finished matches.",
+      sampleSize: Math.min(homeOverall.matches, awayOverall.matches) || undefined,
+    },
+    {
+      id: "injuries",
+      label: "Injuries & suspensions",
+      weight: 0.1,
+      appliedWeight: 0,
+      available: false,
+      tilt: "neutral",
+      detail: "No player-availability feed is published for this product yet — weight held at 0.",
+    },
+    {
+      id: "motivation",
+      label: "Motivation",
+      weight: 0.05,
+      appliedWeight: 0,
+      available: false,
+      tilt: "neutral",
+      detail: "Group-table motivation is shown in match intelligence when available; it does not yet move forecast xG.",
+    },
+  ];
+
   const phase: MatchModelForecast["phase"] =
     input.fixture.status === "finished" && input.fixture.score
       ? "final"
@@ -412,8 +590,8 @@ export function buildDeterministicForecast(
   if (sample > 0) {
     evidence.push({
       kind: "competition_history",
-      label: `${sample} completed ${input.fixture.competition || "competition"} fixtures; ${(totalHomeGoals + totalAwayGoals) / Math.max(sample, 1)} goals per match`,
-      source: input.fixtureSource === "txline" ? "TxLINE fixture history" : "TheSportsDB fixture history",
+      label: `${sample} completed ${input.fixture.competition || "competition"} fixtures; ${rounded((totalHomeGoals + totalAwayGoals) / Math.max(sample, 1))} goals per match`,
+      source: historySource,
       asOf: Math.max(...scored.map((fixture) => fixture.kickoffTs)),
       sampleSize: sample,
     });
@@ -426,38 +604,26 @@ export function buildDeterministicForecast(
       sampleSize: 0,
     });
   }
-  for (const [team, form] of [
-    [input.fixture.home, homeForm],
-    [input.fixture.away, awayForm],
+  for (const [team, form, venueForm] of [
+    [input.fixture.home, homeOverall, homeVenue],
+    [input.fixture.away, awayOverall, awayVenue],
   ] as const) {
     if (!form.matches || !form.latestAt) continue;
     evidence.push({
       kind: "team_form",
-      label: `${team.name}: ${form.goalsFor} scored, ${form.goalsAgainst} conceded, ${form.points} points across ${form.matches} recent ${form.matches === 1 ? "match" : "matches"}`,
-      source: input.fixtureSource === "txline" ? "TxLINE fixture history" : "TheSportsDB fixture history",
+      label: `${team.name}: ${rounded(form.goalsFor)} scored, ${rounded(form.goalsAgainst)} conceded, ${rounded(form.points)} pts in ${form.matches} recent · venue sample ${venueForm.matches}`,
+      source: historySource,
       asOf: form.latestAt,
       sampleSize: form.matches,
     });
   }
-  if (headToHead.length) {
-    let homeWins = 0;
-    let draws = 0;
-    let awayWins = 0;
-    for (const fixture of headToHead) {
-      if (!fixture.score) continue;
-      const targetHomeWasHome = sameTeam(input.fixture.home, fixture.home);
-      const targetHomeGoals = targetHomeWasHome ? fixture.score.home : fixture.score.away;
-      const targetAwayGoals = targetHomeWasHome ? fixture.score.away : fixture.score.home;
-      if (targetHomeGoals > targetAwayGoals) homeWins += 1;
-      else if (targetHomeGoals < targetAwayGoals) awayWins += 1;
-      else draws += 1;
-    }
+  if (h2hSample) {
     evidence.push({
       kind: "head_to_head",
-      label: `${headToHead.length} recent completed meetings: ${input.fixture.home.name} ${homeWins} wins, ${draws} draws, ${input.fixture.away.name} ${awayWins} wins`,
-      source: input.fixtureSource === "txline" ? "TxLINE fixture history" : "TheSportsDB fixture history",
+      label: `${h2hSample} recent completed meetings: ${input.fixture.home.name} ${homeWins} wins, ${draws} draws, ${input.fixture.away.name} ${awayWins} wins`,
+      source: historySource,
       asOf: Math.max(...headToHead.map((fixture) => fixture.kickoffTs)),
-      sampleSize: headToHead.length,
+      sampleSize: h2hSample,
     });
   }
 
@@ -510,16 +676,17 @@ export function buildDeterministicForecast(
     confidence: confidenceFor(
       input,
       sample,
-      homeForm,
-      awayForm,
-      headToHead.length,
+      homeOverall,
+      awayOverall,
+      h2hSample,
       phase,
       minute,
       now
     ),
     evidence,
+    factors,
     disclaimer:
-      "Informational model forecast, not a guarantee or settlement input. Pool prices are reported separately.",
+      "Informational model forecast, not a guarantee or settlement input. Pool prices are reported separately. Injuries are excluded until a real availability feed exists.",
   };
 }
 
@@ -575,11 +742,14 @@ function deterministicNarrative(
   const likely = model.likelyOutcome;
   const share = Math.round(model.probabilities[likely] * 100);
   const evidenceNote = model.evidence.some((item) => item.kind === "team_form")
-    ? "recent team and competition results"
+    ? "recent form, venue context, and competition results"
     : "a neutral scoring prior because completed team history is limited";
+  const factorNote = model.factors?.some((factor) => factor.available)
+    ? " Factor weights are shown separately and re-scale when a feed is missing."
+    : "";
   return {
     source: "deterministic",
-    text: `The model gives ${outcomeName(likely, fixture)} the largest share at ${share}%, with ${model.confidence.level} confidence based on ${evidenceNote}. This remains uncertain and is separate from the funded pool.`,
+    text: `The model gives ${outcomeName(likely, fixture)} the largest share at ${share}%, with ${model.confidence.level} confidence based on ${evidenceNote}.${factorNote} This remains uncertain and is separate from the funded pool.`,
   };
 }
 
@@ -898,22 +1068,19 @@ function forecastInputFromState(
 export async function getMatchForecast(fixtureId: string): Promise<MatchForecast | null> {
   let input = forecastInputFromState(fixtureId);
   if (!input) return null;
-  if (input.fixtureSource !== "txline") {
-    const history = await getPublicForecastHistory(input.fixture);
-    input = forecastInputFromState(fixtureId, history) || input;
-  }
+  // Always enrich with TheSportsDB finished-match history for form/H2H.
+  // Settlement still requires TxLINE validation — this path is forecast-only.
+  const history = await getPublicForecastHistory(input.fixture);
+  input = forecastInputFromState(fixtureId, history) || input;
   return forecastService.forecast(input);
 }
 
 export function getCachedMatchForecast(fixtureId: string): MatchForecast | null {
   const base = forecastInputFromState(fixtureId);
-  const input = base
-    ? forecastInputFromState(
-        fixtureId,
-        base.fixtureSource === "txline"
-          ? []
-          : getCachedPublicForecastHistory(base.fixture)
-      )
-    : null;
+  if (!base) return null;
+  const input = forecastInputFromState(
+    fixtureId,
+    getCachedPublicForecastHistory(base.fixture)
+  );
   return input ? forecastService.peek(input) : null;
 }

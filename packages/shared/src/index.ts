@@ -125,6 +125,26 @@ export interface ForecastEvidence {
   sampleSize?: number;
 }
 
+/** Transparent contribution of one evidence family to the pre-match read. */
+export interface ForecastFactor {
+  id:
+    | "recent_form"
+    | "home_away"
+    | "head_to_head"
+    | "attack_defense"
+    | "injuries"
+    | "motivation";
+  label: string;
+  /** Target share of the explanatory blend (sums to 1 across factors). */
+  weight: number;
+  /** Share actually applied after data availability gating. */
+  appliedWeight: number;
+  available: boolean;
+  tilt: MatchResultOutcome | "neutral";
+  detail: string;
+  sampleSize?: number;
+}
+
 export interface ForecastConfidence {
   level: ForecastConfidenceLevel;
   /** Evidence-quality score in the inclusive range 0..1; not outcome probability. */
@@ -141,14 +161,34 @@ export interface ForecastFreshness {
 }
 
 export interface MatchModelForecast {
-  version: "whistle-poisson-v1";
+  version: "whistle-poisson-v1" | "whistle-poisson-v2";
   phase: ForecastPhase;
   probabilities: ForecastProbabilities;
   expectedGoals: { home: number; away: number };
   likelyOutcome: MatchResultOutcome;
   confidence: ForecastConfidence;
   evidence: ForecastEvidence[];
+  /** Factor breakdown for UI; does not replace the Poisson engine. */
+  factors?: ForecastFactor[];
   disclaimer: string;
+}
+
+/** Display metadata resolved from public sports APIs (never settlement authority). */
+export interface MatchInfo {
+  fixtureId: string;
+  venue?: string;
+  round?: string;
+  city?: string;
+  thumb?: string;
+  poster?: string;
+  banner?: string;
+  homeFormation?: string;
+  awayFormation?: string;
+  homeCoach?: string;
+  awayCoach?: string;
+  tsdbEventId?: string;
+  source: string;
+  asOf: number;
 }
 
 export interface CrowdPriceSnapshot {

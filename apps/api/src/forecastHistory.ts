@@ -3,6 +3,7 @@ import {
   publicEventToFixture,
   type TsdbEvent,
 } from "./fixtures/publicSchedule";
+import { resolveTsdbTeamId } from "./fixtures/teamAssets";
 import { getLogger } from "./observability";
 
 const TSDB = "https://www.thesportsdb.com/api/v1/json/123";
@@ -50,8 +51,10 @@ function retryAfterMs(response: Response): number {
 }
 
 function teamId(team: Fixture["home"]): string | null {
+  // Prefer TheSportsDB ids only — TxLINE participant ids are a different namespace.
   const id = String(team.id || "").trim();
-  return /^\d+$/.test(id) ? id : null;
+  if (id.startsWith("tsdb-")) return id.slice(5);
+  return null;
 }
 
 function dedupeFixtures(fixtures: Fixture[]): Fixture[] {
@@ -226,20 +229,27 @@ export function createForecastHistoryProvider(
     return request;
   };
 
-  const requestsFor = (fixture: Fixture): HistoryRequest[] => {
-    const ids = [
-      ...new Set([teamId(fixture.home), teamId(fixture.away)].filter(Boolean)),
-    ] as string[];
+  const resolveIds = async (fixture: Fixture): Promise<string[]> => {
+    // Always resolve by team name so TxLINE participant ids are never
+    // mistaken for TheSportsDB team ids.
+    const [homeId, awayId] = await Promise.all([
+      resolveTsdbTeamId(fixture.home.name),
+      resolveTsdbTeamId(fixture.away.name),
+    ]);
+    return [...new Set([homeId, awayId].filter(Boolean))] as string[];
+  };
+
+  const requestsFor = async (fixture: Fixture): Promise<HistoryRequest[]> => {
+    const ids = await resolveIds(fixture);
     const teamRequests = ids.map((id) => ({
       key: `team:${id}`,
       load: () => fetchTeam(id, fixture.kickoffTs),
       logContext: { teamId: id },
     }));
-    if (ids.length !== 2) return teamRequests;
     return [
       ...teamRequests,
       {
-        key: `head-to-head:${[...ids].sort().join(":")}`,
+        key: `head-to-head:${normalizedName(fixture.home.name)}:${normalizedName(fixture.away.name)}`,
         load: () => fetchHeadToHead(fixture),
         logContext: {
           matchup: `${fixture.home.name} vs ${fixture.away.name}`,
@@ -251,17 +261,29 @@ export function createForecastHistoryProvider(
   return {
     peek(fixture: Fixture): Fixture[] {
       const now = clock();
+      const h2hKey = `head-to-head:${normalizedName(fixture.home.name)}:${normalizedName(fixture.away.name)}`;
+      const keys = [h2hKey, ...[...cache.keys()].filter((key) => key.startsWith("team:"))];
+      const home = normalizedName(fixture.home.name);
+      const away = normalizedName(fixture.away.name);
       return dedupeFixtures(
-        requestsFor(fixture).flatMap(({ key }) => {
-          const entry = cache.get(key);
-          return entry && entry.expiresAt > now ? entry.fixtures : [];
-        })
+        keys
+          .flatMap((key) => {
+            const entry = cache.get(key);
+            return entry && entry.expiresAt > now ? entry.fixtures : [];
+          })
+          .filter((candidate) => {
+            const names = [
+              normalizedName(candidate.home.name),
+              normalizedName(candidate.away.name),
+            ];
+            return names.includes(home) || names.includes(away);
+          })
       );
     },
 
     async get(fixture: Fixture): Promise<Fixture[]> {
       const now = clock();
-      const entries = requestsFor(fixture);
+      const entries = await requestsFor(fixture);
       const missing = entries.filter(({ key }) => {
         const entry = cache.get(key);
         return !entry || entry.expiresAt <= now;

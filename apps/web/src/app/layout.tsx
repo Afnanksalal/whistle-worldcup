@@ -155,6 +155,8 @@ export default function RootLayout({
       <head>
         <link rel="preconnect" href="https://r2.thesportsdb.com" crossOrigin="anonymous" />
         <link rel="dns-prefetch" href="https://r2.thesportsdb.com" />
+        <link rel="preconnect" href="https://flagcdn.com" crossOrigin="anonymous" />
+        <link rel="dns-prefetch" href="https://flagcdn.com" />
       </head>
       <body className={`${bodyFont.variable} ${displayFont.variable} ${dataFont.variable}`}>
         <JsonLd data={structuredData} />
