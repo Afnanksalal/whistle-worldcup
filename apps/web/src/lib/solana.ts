@@ -38,7 +38,8 @@ export function deriveMarketPDA(
   line?: number,
   squadId?: string
 ): PublicKey {
-  const marketTypeByte = marketType === "match_result" ? 0 : 1;
+  const marketTypeByte =
+    marketType === "match_result" ? 0 : marketType === "total_corners" ? 2 : 1;
   const lineBuffer = Buffer.alloc(4);
   lineBuffer.writeUInt32LE(line === undefined ? 0 : Math.round(line * 100));
   return PublicKey.findProgramAddressSync(

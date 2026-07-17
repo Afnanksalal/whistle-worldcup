@@ -8,6 +8,7 @@ import type {
   MatchStats,
   OddsQuote,
   PricePoint,
+  SettlementReceipt,
 } from "@whistle/shared";
 
 export type MatchDetail = {
@@ -21,4 +22,5 @@ export type MatchDetail = {
   matchInfo?: MatchInfo | null;
   insights?: InsightCard[];
   forecast?: MatchForecast | null;
+  receipt?: SettlementReceipt | null;
 };

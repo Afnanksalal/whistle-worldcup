@@ -15,16 +15,20 @@ Living checklist for Superteam World Cup track + production ops.
 - [x] VPS Docker + Caddy deploy (no Vercel)
 - [x] CI + CD to Playground VPS
 - [x] Prediction graphs (pool implied-price history)
-- [x] Live match stats + event tape (TheSportsDB / TxLINE)
+- [x] Live match stats + TxLINE event tape parsing
 - [x] AI insights desk (quantitative engine + optional LLM)
-- [x] Settled notification toasts removed
+- [x] Settlement receipts (seq, Merkle summary, PDA, proof JSON)
+- [x] On-chain daily_scores_roots verification + Anchor CPI hook for validate_stat_v2
+- [x] Auto markets: 1X2, O/U goals, first scorer, corners, tournament winner
+- [x] Global `/markets` liquidity board
+- [x] Live match UX: event tape, score pulse, WS refresh, honest source badges
 
-## Remaining
+## Remaining (human / ops)
 
-- [ ] Replace placeholder `txl_…` with real `TXLINE_API_TOKEN` when activated
-- [ ] Named Cloudflare tunnel (stable hostname)
-- [ ] Anchor `anchor deploy` + `WHISTLE_PROGRAM_ID`
-- [ ] Demo Loom ≤5 min + Superteam submission
+- [ ] Named Cloudflare tunnel (stable hostname) — needs `CLOUDFLARE_TUNNEL_TOKEN`
+- [ ] Anchor `anchor deploy` + enable USDC overlay on playground
+- [ ] Demo Loom ≤5 min + Superteam submission form
+- [ ] Seed demo liquidity before recording
 
 ## Ops
 

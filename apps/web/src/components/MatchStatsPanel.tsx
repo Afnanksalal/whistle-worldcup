@@ -1,6 +1,6 @@
 "use client";
 
-import type { MatchStats } from "@whistle/shared";
+import type { MatchEvent, MatchStats } from "@whistle/shared";
 import { formatClock, useLocalTimeContext } from "../lib/local-time";
 
 function Bar({
@@ -70,14 +70,17 @@ export function MatchStatsPanel({
   stats,
   homeName,
   awayName,
+  liveEvents,
 }: {
   stats: MatchStats | null;
   homeName: string;
   awayName: string;
+  liveEvents?: MatchEvent[];
 }) {
   const localTime = useLocalTimeContext();
+  const events = (stats?.events?.length ? stats.events : liveEvents) || [];
 
-  if (!stats) {
+  if (!stats && !events.length) {
     return (
       <div className="panel" style={{ padding: "1.25rem", color: "var(--mute)" }}>
         Syncing live match statistics…
@@ -86,16 +89,16 @@ export function MatchStatsPanel({
   }
 
   const rows: Array<[string, number, number]> = [];
-  if (stats.possession) rows.push(["Possession %", stats.possession.home, stats.possession.away]);
-  if (stats.shots) rows.push(["Shots", stats.shots.home, stats.shots.away]);
-  if (stats.shotsOnTarget)
+  if (stats?.possession) rows.push(["Possession %", stats.possession.home, stats.possession.away]);
+  if (stats?.shots) rows.push(["Shots", stats.shots.home, stats.shots.away]);
+  if (stats?.shotsOnTarget)
     rows.push(["On target", stats.shotsOnTarget.home, stats.shotsOnTarget.away]);
-  if (stats.corners) rows.push(["Corners", stats.corners.home, stats.corners.away]);
-  if (stats.fouls) rows.push(["Fouls", stats.fouls.home, stats.fouls.away]);
-  if (stats.yellowCards)
+  if (stats?.corners) rows.push(["Corners", stats.corners.home, stats.corners.away]);
+  if (stats?.fouls) rows.push(["Fouls", stats.fouls.home, stats.fouls.away]);
+  if (stats?.yellowCards)
     rows.push(["Yellow cards", stats.yellowCards.home, stats.yellowCards.away]);
-  if (stats.redCards) rows.push(["Red cards", stats.redCards.home, stats.redCards.away]);
-  if (stats.offsides) rows.push(["Offsides", stats.offsides.home, stats.offsides.away]);
+  if (stats?.redCards) rows.push(["Red cards", stats.redCards.home, stats.redCards.away]);
+  if (stats?.offsides) rows.push(["Offsides", stats.offsides.home, stats.offsides.away]);
 
   return (
     <div className="panel" style={{ padding: "1.2rem" }}>
@@ -104,7 +107,8 @@ export function MatchStatsPanel({
           Match statistics
         </h2>
         <span className="mono" style={{ color: "var(--mute)", fontSize: "0.68rem" }}>
-          {stats.source.toUpperCase()} · {formatClock(stats.updatedAt, localTime)}
+          {(stats?.source || "txline").toUpperCase()}
+          {stats ? ` · ${formatClock(stats.updatedAt, localTime)}` : ""}
         </span>
       </div>
       {!rows.length && (
@@ -121,12 +125,12 @@ export function MatchStatsPanel({
         Event tape
       </h3>
       <div style={{ display: "grid", gap: "0.35rem", maxHeight: 220, overflowY: "auto" }}>
-        {stats.events.length === 0 && (
+        {events.length === 0 && (
           <p style={{ color: "var(--mute)", margin: 0, fontSize: "0.88rem" }}>
             No timed events yet for this fixture.
           </p>
         )}
-        {stats.events.map((e, i) => (
+        {events.map((e, i) => (
           <div
             key={`${e.minute}-${e.type}-${i}`}
             className="mono"

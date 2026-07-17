@@ -1,6 +1,7 @@
 import {
   Fixture,
   LiveScoreUpdate,
+  MatchEvent,
   TXLINE_DEVNET,
   TXLINE_MAINNET,
   isFinalScoreRecord,
@@ -221,6 +222,121 @@ export function normalizeFixture(raw: unknown): Fixture | null {
   };
 }
 
+function teamSideFromParticipant(
+  value: unknown
+): "home" | "away" | undefined {
+  if (typeof value === "number") {
+    if (value === 1) return "home";
+    if (value === 2) return "away";
+  }
+  const text = String(value || "").toLowerCase();
+  if (!text) return undefined;
+  if (
+    text === "1" ||
+    text === "home" ||
+    text === "participant1" ||
+    text === "team1" ||
+    text.includes("home")
+  ) {
+    return "home";
+  }
+  if (
+    text === "2" ||
+    text === "away" ||
+    text === "participant2" ||
+    text === "team2" ||
+    text.includes("away")
+  ) {
+    return "away";
+  }
+  return undefined;
+}
+
+function normalizeActionType(action: string): string {
+  const a = action.toLowerCase().replace(/[\s-]+/g, "_");
+  if (a.includes("yellow")) return "yellow_card";
+  if (a.includes("red") && a.includes("card")) return "red_card";
+  if (a.includes("corner")) return "corner";
+  if (a.includes("substitut")) return "substitution";
+  if (a.includes("penalty")) return "penalty";
+  if (a === "goal" || a.includes("goal_scored") || a === "score") return "goal";
+  if (a.includes("shot")) return "shot";
+  if (a.includes("free_kick") || a.includes("freekick")) return "free_kick";
+  if (a.includes("var")) return "var";
+  if (a.includes("offside")) return "offside";
+  return a || "event";
+}
+
+/** Extract MatchEvent(s) from a raw TxLINE soccer score record. */
+export function extractScoreEvents(raw: unknown): MatchEvent[] {
+  if (!raw || typeof raw !== "object") return [];
+  const o = raw as Record<string, unknown>;
+  const action = pickString(o, ["action", "Action", "event", "EventType", "type"]);
+  const data =
+    (o.Data as Record<string, unknown> | undefined) ||
+    (o.data as Record<string, unknown> | undefined) ||
+    (o.payload as Record<string, unknown> | undefined) ||
+    {};
+  const nestedEvents = asArray(o.events || o.Events || data.events);
+  const out: MatchEvent[] = [];
+
+  for (const item of nestedEvents) {
+    if (!item || typeof item !== "object") continue;
+    const ev = item as Record<string, unknown>;
+    const type = normalizeActionType(
+      pickString(ev, ["type", "Type", "action", "Action"]) || "event"
+    );
+    out.push({
+      type,
+      minute: pickNumber(ev, ["minute", "Minute", "clock", "Clock"]),
+      team: teamSideFromParticipant(
+        ev.participant ?? ev.Participant ?? ev.team ?? ev.Team
+      ),
+      player: pickString(ev, [
+        "player",
+        "Player",
+        "playerName",
+        "PlayerName",
+        "PlayerFullName",
+      ]),
+      detail: pickString(ev, ["detail", "Detail", "text", "Text", "outcome", "Outcome"]),
+    });
+  }
+
+  if (!action) return out;
+  const type = normalizeActionType(action);
+  // Skip pure status / heartbeat actions unless they carry player detail.
+  const skip =
+    type.includes("game_") ||
+    type.includes("period_") ||
+    type === "comment" ||
+    type === "heartbeat";
+  if (skip && !pickString(data, ["PlayerName", "playerName", "Player"])) {
+    return out;
+  }
+
+  out.push({
+    type,
+    minute:
+      pickNumber(data, ["Minute", "minute", "Clock", "clock"]) ??
+      pickNumber(o, ["minute", "Minute", "clock", "Clock"]),
+    team: teamSideFromParticipant(
+      data.Participant ?? data.participant ?? data.Team ?? o.participant
+    ),
+    player: pickString(data, [
+      "PlayerName",
+      "playerName",
+      "Player",
+      "player",
+      "PlayerFullName",
+    ]),
+    detail:
+      pickString(data, ["Text", "text", "Outcome", "outcome", "Type", "FreeKickType"]) ||
+      action,
+  });
+  return out;
+}
+
 export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
@@ -256,7 +372,8 @@ export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
     statusRaw.includes("live") ||
     statusRaw.includes("inplay") ||
     statusRaw.includes("progress") ||
-    action?.toLowerCase().includes("score")
+    action?.toLowerCase().includes("score") ||
+    action?.toLowerCase().includes("goal")
   ) {
     status = "live";
   }
@@ -267,6 +384,7 @@ export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
   }
 
   const eventTs = pickTimestamp(o, ["ts", "timestamp", "Timestamp"]) ?? Date.now();
+  const events = extractScoreEvents(raw);
 
   return {
     fixtureId,
@@ -277,6 +395,7 @@ export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
     action,
     period,
     clock: pickString(o, ["clock", "Clock", "minute", "time"]),
+    events: events.length ? events : undefined,
     ts: eventTs,
   };
 }
@@ -341,22 +460,35 @@ export async function fetchStatValidationV2(
   cfg: TxlineConfig,
   fixtureId: string,
   seq: number | string,
-  statKeys: string[]
+  statKeys: Array<string | number> = [1, 2]
 ): Promise<unknown> {
-  const qs = new URLSearchParams({
-    fixtureId: String(fixtureId),
-    seq: String(seq),
-    statKey: statKeys.join(","),
-  });
-  const paths = [
-    `/api/scores/stat-validation-v2?${qs}`,
-    `/api/scores/stat-validation?${qs}`,
+  const keyList = statKeys.map(String).join(",");
+  const queryShapes = [
+    new URLSearchParams({
+      fixtureId: String(fixtureId),
+      seq: String(seq),
+      statKeys: keyList,
+    }),
+    new URLSearchParams({
+      fixtureId: String(fixtureId),
+      seq: String(seq),
+      statKey: keyList,
+    }),
+    new URLSearchParams({
+      fixtureId: String(fixtureId),
+      seq: String(seq),
+      statKey: String(statKeys[0] ?? 1),
+      statKey2: String(statKeys[1] ?? 2),
+    }),
   ];
-  for (const p of paths) {
-    try {
-      return await getJson(`${cfg.apiOrigin}${p}`, cfg);
-    } catch {
-      // next
+  const bases = ["/api/scores/stat-validation-v2", "/api/scores/stat-validation"];
+  for (const base of bases) {
+    for (const qs of queryShapes) {
+      try {
+        return await getJson(`${cfg.apiOrigin}${base}?${qs}`, cfg);
+      } catch {
+        // next shape
+      }
     }
   }
   throw new Error(`stat-validation failed for fixture ${fixtureId}`);

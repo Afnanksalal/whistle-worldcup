@@ -9,6 +9,7 @@ import { BrandMark } from "./BrandMark";
 
 const links = [
   { href: "/", label: "Matches", short: "Matches", icon: "matches" },
+  { href: "/markets", label: "Markets", short: "Markets", icon: "markets" },
   { href: "/groups", label: "Tournament", short: "Groups", icon: "tournament" },
   { href: "/news", label: "News", short: "News", icon: "news" },
   { href: "/positions", label: "My picks", short: "My picks", icon: "picks" },
@@ -48,6 +49,12 @@ function NavGlyph({ name }: { name: (typeof links)[number]["icon"] }) {
           <>
             <path d="M6.25 4.25h11.5v15.5H6.25z" />
             <path d="M8.8 7.5h6.4M8.8 10.5h6.4M8.8 13.5h4.35M8.8 16.5h5.2" />
+          </>
+        )}
+        {name === "markets" && (
+          <>
+            <path d="M4.5 18.5V5.5M4.5 18.5h15" />
+            <path d="M7.5 14.5v4M11.5 10.5v8M15.5 7.5v11M19.5 12.5v6" />
           </>
         )}
         {name === "picks" && (
@@ -99,7 +106,7 @@ function MountedWalletButton() {
 export function Nav() {
   const pathname = usePathname();
   const { meta } = useRuntime();
-  const dataIsLive = meta.txlineConfigured;
+  const dataIsLive = meta.fixtureSource === "txline" || meta.txlineConfigured;
   const isHome = pathname === "/";
   const [hasScrolled, setHasScrolled] = useState(false);
 
@@ -155,7 +162,11 @@ export function Nav() {
           <div className="nav-actions">
             <span className={`data-status${dataIsLive ? " is-live" : " is-preview"}`}>
               <span className="data-status-dot" aria-hidden />
-              {dataIsLive ? "Live match feed" : "Schedule preview"}
+              {meta.fixtureSource === "txline"
+                ? "TxLINE live"
+                : dataIsLive
+                  ? "Live match feed"
+                  : "Schedule preview"}
             </span>
             <MountedWalletButton />
           </div>

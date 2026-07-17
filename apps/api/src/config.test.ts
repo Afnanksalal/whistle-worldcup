@@ -204,6 +204,7 @@ describe("on-chain ledger compatibility", () => {
     priceHistory: {},
     matchStats: {},
     insights: {},
+    receipts: {},
     notifications: [],
   });
 

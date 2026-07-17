@@ -19,6 +19,7 @@ import {
 import { maybeSettleFixture } from "./settlement/keeper";
 import {
   amountToBaseUnits,
+  impliedShares,
   outcomeToU8,
   type Fixture,
   type MarketOutcome,
@@ -170,6 +171,53 @@ export function createRouter(cfg: AppConfig) {
       matchInfo: matchInfo || getCachedMatchInfo(fixture.id),
       insights: getInsights(fixture.id),
       forecast,
+      receipt: getState().receipts[fixture.id] || null,
+      meta: publicMeta(cfg, getFixtureSource()),
+    });
+  });
+
+  router.get("/fixtures/:id/receipt", (req, res) => {
+    const receipt = getState().receipts[req.params.id];
+    if (!receipt) return res.status(404).json({ error: "receipt not found" });
+    res.json({ receipt });
+  });
+
+  router.get("/markets/board", (_req, res) => {
+    const state = getState();
+    const rows = Object.values(state.markets)
+      .filter((market) => !market.squadId)
+      .map((market) => {
+        const fixture = state.fixtures[market.fixtureId];
+        const odds = state.odds[market.fixtureId] || [];
+        return {
+          id: market.id,
+          fixtureId: market.fixtureId,
+          match: fixture
+            ? `${fixture.home.name} vs ${fixture.away.name}`
+            : market.fixtureId,
+          competition: fixture?.competition,
+          kickoffTs: fixture?.kickoffTs,
+          marketType: market.marketType,
+          line: market.line,
+          status: market.status,
+          totalPool: market.totalPool,
+          implied: impliedShares(market.outcomes),
+          outcomes: market.outcomes,
+          winningOutcome: market.winningOutcome,
+          referenceOdds: odds.slice(0, 6),
+          receipt: state.receipts[market.fixtureId] || null,
+        };
+      })
+      .sort((a, b) => b.totalPool - a.totalPool || (a.kickoffTs || 0) - (b.kickoffTs || 0));
+    res.json({
+      markets: rows,
+      totals: {
+        volume: rows.reduce((sum, row) => sum + row.totalPool, 0),
+        open: rows.filter((row) => row.status === "open").length,
+        locked: rows.filter((row) => row.status === "locked").length,
+        settled: rows.filter((row) => row.status === "settled").length,
+      },
+      serverNow: Date.now(),
       meta: publicMeta(cfg, getFixtureSource()),
     });
   });
@@ -277,7 +325,13 @@ export function createRouter(cfg: AppConfig) {
   router.post("/markets", admin, (req, res) => {
     const schema = z.object({
       fixtureId: z.string(),
-      marketType: z.enum(["match_result", "total_goals"]),
+      marketType: z.enum([
+        "match_result",
+        "total_goals",
+        "first_scorer",
+        "total_corners",
+        "tournament_winner",
+      ]),
       line: totalLine.optional(),
       squadId: z.string().optional(),
     });
@@ -305,7 +359,9 @@ export function createRouter(cfg: AppConfig) {
     }
     const schema = z.object({
       fixtureId: z.string(),
-      marketType: z.enum(["match_result", "total_goals"]).default("match_result"),
+      marketType: z
+        .enum(["match_result", "total_goals", "first_scorer", "total_corners"])
+        .default("match_result"),
       line: totalLine.optional(),
       creator: z.string().min(1),
     });

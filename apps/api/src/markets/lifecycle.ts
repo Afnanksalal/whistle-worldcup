@@ -17,8 +17,9 @@ export type MarketReconcileSummary = {
 };
 
 function normalizedLine(market: Pick<MarketPool, "marketType" | "line">): string {
-  if (market.marketType !== "total_goals") return "";
-  return String(market.line ?? 2.5);
+  if (market.marketType === "total_goals") return String(market.line ?? 2.5);
+  if (market.marketType === "total_corners") return String(market.line ?? 9.5);
+  return "";
 }
 
 export function marketIdentityKey(

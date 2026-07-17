@@ -208,11 +208,40 @@ export async function refreshFixtures(cfg: TxlineConfig | null) {
   await loadPublicBoard();
 }
 
+function eventKey(event: {
+  type: string;
+  minute?: number;
+  team?: string;
+  player?: string;
+  detail?: string;
+}): string {
+  return [
+    event.type,
+    event.minute ?? "",
+    event.team ?? "",
+    event.player ?? "",
+    event.detail ?? "",
+  ].join("|");
+}
+
 function applyScoreUpdate(update: ReturnType<typeof normalizeScoreUpdate>) {
   if (!update) return;
   markIngest();
   mutate((s) => {
-    s.live[update.fixtureId] = update;
+    const prev = s.live[update.fixtureId];
+    const mergedEvents = [...(prev?.events || [])];
+    const seen = new Set(mergedEvents.map(eventKey));
+    for (const event of update.events || []) {
+      const key = eventKey(event);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      mergedEvents.push(event);
+    }
+    mergedEvents.sort((a, b) => (a.minute || 0) - (b.minute || 0));
+    s.live[update.fixtureId] = {
+      ...update,
+      events: mergedEvents.length ? mergedEvents : update.events,
+    };
     const f = s.fixtures[update.fixtureId];
     if (f) {
       f.score = { home: update.homeScore, away: update.awayScore };

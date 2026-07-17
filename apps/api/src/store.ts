@@ -9,6 +9,7 @@ import {
   OddsQuote,
   Position,
   PricePoint,
+  SettlementReceipt,
   Squad,
 } from "@whistle/shared";
 
@@ -25,6 +26,8 @@ export interface AppState {
   matchStats: Record<string, MatchStats>;
   /** Cached insights keyed by fixtureId */
   insights: Record<string, InsightCard[]>;
+  /** TxLINE-verified settlement receipts keyed by fixtureId */
+  receipts: Record<string, SettlementReceipt>;
   notifications: Array<{
     id: string;
     type: string;
@@ -52,6 +55,7 @@ function emptyState(): AppState {
     priceHistory: {},
     matchStats: {},
     insights: {},
+    receipts: {},
     notifications: [],
   };
 }

@@ -10,8 +10,11 @@ import {
   amountToBaseUnits,
   impliedShares,
   payoutForPosition,
+  resolveCorners,
+  resolveFirstScorer,
   resolveMatchResult,
   resolveTotals,
+  teamOutcomeSlug,
 } from "@whistle/shared";
 import { getState, mutate } from "../store";
 import { recordMarketPrice } from "./prices";
@@ -24,8 +27,19 @@ import {
 } from "./lifecycle";
 import { settleMarketOnchain, voidMarketOnchain } from "../settlement/onchain";
 
-function defaultOutcomes(marketType: MarketType): Record<string, number> {
+function defaultOutcomes(
+  marketType: MarketType,
+  teams?: string[]
+): Record<string, number> {
   if (marketType === "match_result") return { home: 0, draw: 0, away: 0 };
+  if (marketType === "first_scorer") return { home: 0, away: 0, none: 0 };
+  if (marketType === "tournament_winner") {
+    const outcomes: Record<string, number> = {};
+    for (const name of teams || []) {
+      outcomes[teamOutcomeSlug(name)] = 0;
+    }
+    return outcomes;
+  }
   return { over: 0, under: 0 };
 }
 
@@ -53,15 +67,17 @@ export function ensureMarket(
     throw new Error("markets can only be created before kickoff for scheduled fixtures");
   }
 
-  const line =
-    req.marketType === "total_goals"
-      ? Math.round((req.line ?? 2.5) * 100) / 100
-      : undefined;
+  const needsLine =
+    req.marketType === "total_goals" || req.marketType === "total_corners";
+  const defaultLine = req.marketType === "total_corners" ? 9.5 : 2.5;
+  const line = needsLine
+    ? Math.round((req.line ?? defaultLine) * 100) / 100
+    : undefined;
   if (
-    req.marketType === "total_goals" &&
+    needsLine &&
     (!Number.isFinite(line) || line! <= 0 || !Number.isInteger(line! * 2))
   ) {
-    throw new Error("total-goals line must be a positive half-goal line");
+    throw new Error("line must be a positive half-unit line");
   }
 
   const squadId = opts?.forcePublic ? undefined : req.squadId;
@@ -193,11 +209,19 @@ export function marketImplied(marketId: string) {
   return { market, implied: impliedShares(market.outcomes) };
 }
 
+export type SettleContext = {
+  firstTeam?: "home" | "away" | null;
+  homeCorners?: number;
+  awayCorners?: number;
+  winningOutcome?: MarketOutcome;
+};
+
 export function settleMarketOffchain(
   marketId: string,
   homeScore: number,
   awayScore: number,
-  settleTxSig?: string
+  settleTxSig?: string,
+  ctx: SettleContext = {}
 ) {
   const market = getState().markets[marketId];
   if (!market) throw new Error("market not found");
@@ -207,8 +231,18 @@ export function settleMarketOffchain(
   }
 
   let winning: MarketOutcome;
-  if (market.marketType === "match_result") {
+  if (ctx.winningOutcome) {
+    winning = ctx.winningOutcome;
+  } else if (market.marketType === "match_result") {
     winning = resolveMatchResult(homeScore, awayScore);
+  } else if (market.marketType === "first_scorer") {
+    winning = resolveFirstScorer(homeScore, awayScore, ctx.firstTeam);
+  } else if (market.marketType === "total_corners") {
+    const homeCorners = ctx.homeCorners ?? 0;
+    const awayCorners = ctx.awayCorners ?? 0;
+    winning = resolveCorners(homeCorners, awayCorners, market.line ?? 9.5);
+  } else if (market.marketType === "tournament_winner") {
+    throw new Error("tournament_winner requires an explicit winningOutcome");
   } else {
     winning = resolveTotals(homeScore, awayScore, market.line ?? 2.5);
   }
@@ -228,15 +262,70 @@ export async function settleMarketVerified(
   marketId: string,
   homeScore: number,
   awayScore: number,
-  onchainEnabled: boolean
+  onchainEnabled: boolean,
+  ctx: SettleContext = {}
 ) {
   const market = getState().markets[marketId];
   if (!market) throw new Error("market not found");
   let signature: string | undefined;
-  if (onchainEnabled && market.totalPool > 0) {
-    signature = (await settleMarketOnchain(market, homeScore, awayScore)).signature;
+  const onchainType =
+    market.marketType === "match_result" ||
+    market.marketType === "total_goals" ||
+    market.marketType === "total_corners";
+  if (onchainEnabled && market.totalPool > 0 && onchainType) {
+    const onchainHome =
+      market.marketType === "total_corners" ? Math.round(ctx.homeCorners ?? 0) : homeScore;
+    const onchainAway =
+      market.marketType === "total_corners" ? Math.round(ctx.awayCorners ?? 0) : awayScore;
+    signature = (await settleMarketOnchain(market, onchainHome, onchainAway)).signature;
   }
-  return settleMarketOffchain(marketId, homeScore, awayScore, signature);
+  return settleMarketOffchain(marketId, homeScore, awayScore, signature, ctx);
+}
+
+/** Create or refresh the global World Cup tournament-winner market. */
+export function ensureTournamentWinnerMarket(opts?: { durable?: boolean }): MarketPool | null {
+  const teams = new Set<string>();
+  for (const fixture of Object.values(getState().fixtures)) {
+    const competition = (fixture.competition || "").toLowerCase();
+    if (!competition.includes("world cup")) continue;
+    if (fixture.home?.name) teams.add(fixture.home.name);
+    if (fixture.away?.name) teams.add(fixture.away.name);
+  }
+  if (teams.size < 2) return null;
+
+  const existing = Object.values(getState().markets).find(
+    (market) => market.marketType === "tournament_winner" && !market.squadId
+  );
+  const outcomes = defaultOutcomes("tournament_winner", [...teams]);
+  if (existing) {
+    mutate((s) => {
+      const market = s.markets[existing.id];
+      for (const key of Object.keys(outcomes)) {
+        if (!(key in market.outcomes)) market.outcomes[key] = 0;
+      }
+    }, "market", existing, { durable: opts?.durable !== false });
+    return getState().markets[existing.id];
+  }
+
+  const identity = marketIdentityKey({
+    fixtureId: "tournament-world-cup-2026",
+    marketType: "tournament_winner",
+    squadId: undefined,
+  });
+  const market: MarketPool = {
+    id: stableMarketId(identity),
+    fixtureId: "tournament-world-cup-2026",
+    marketType: "tournament_winner",
+    status: "open",
+    outcomes,
+    totalPool: 0,
+    createdAt: Date.now(),
+  };
+  mutate((s) => {
+    s.markets[market.id] = market;
+  }, "market", market, { durable: opts?.durable !== false });
+  recordMarketPrice(market.id);
+  return market;
 }
 
 export function voidMarket(marketId: string, reason = "match abandoned") {

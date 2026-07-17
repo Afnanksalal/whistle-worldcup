@@ -20,6 +20,7 @@ function emptyState(): AppState {
     priceHistory: {},
     matchStats: {},
     insights: {},
+    receipts: {},
     notifications: [],
   };
 }
