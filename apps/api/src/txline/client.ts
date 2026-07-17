@@ -140,10 +140,37 @@ export function normalizeFixture(raw: unknown): Fixture | null {
   const id = pickString(o, ["fixtureId", "id", "FixtureId", "fixture_id"]);
   if (!id) return null;
 
-  const home =
-    teamFrom(o.home ?? o.homeTeam ?? o.HomeTeam ?? o.team1, "Home") ;
-  const away =
-    teamFrom(o.away ?? o.awayTeam ?? o.AwayTeam ?? o.team2, "Away");
+  const nestedHome = o.home ?? o.homeTeam ?? o.HomeTeam ?? o.team1;
+  const nestedAway = o.away ?? o.awayTeam ?? o.AwayTeam ?? o.team2;
+
+  let home: Fixture["home"];
+  let away: Fixture["away"];
+
+  const participant1 = pickString(o, ["Participant1", "participant1"]);
+  const participant2 = pickString(o, ["Participant2", "participant2"]);
+
+  if (nestedHome === undefined && nestedAway === undefined && participant1 && participant2) {
+    // Native TxLINE payload: two participants plus a home/away flag.
+    const p1: Fixture["home"] = {
+      id: pickString(o, ["Participant1Id", "participant1Id"]),
+      name: participant1,
+    };
+    const p2: Fixture["away"] = {
+      id: pickString(o, ["Participant2Id", "participant2Id"]),
+      name: participant2,
+    };
+    const p1IsHome = o.Participant1IsHome ?? o.participant1IsHome;
+    if (p1IsHome === false) {
+      home = p2;
+      away = p1;
+    } else {
+      home = p1;
+      away = p2;
+    }
+  } else {
+    home = teamFrom(nestedHome, "Home");
+    away = teamFrom(nestedAway, "Away");
+  }
 
   const kickoff = pickTimestamp(o, [
       "kickoffTs",
