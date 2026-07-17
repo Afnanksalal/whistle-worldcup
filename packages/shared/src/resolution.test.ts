@@ -1,8 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  amountToBaseUnits,
   impliedShares,
   isFinalScoreRecord,
+  marketIdentitySeed,
+  outcomeToU8,
   payoutForPosition,
   resolveMatchResult,
   resolveTotals,
@@ -32,6 +35,28 @@ describe("parimutuel math", () => {
     assert.ok(Math.abs(implied.away - 0.375) < 1e-9);
     assert.equal(payoutForPosition(25, 25, 40), 40);
     assert.equal(payoutForPosition(15, 15, 40), 40);
+  });
+});
+
+describe("on-chain encodings", () => {
+  it("uses stable, scope-specific market seeds", () => {
+    const publicSeed = Buffer.from(marketIdentitySeed("fixture-1"));
+    const samePublicSeed = Buffer.from(marketIdentitySeed("fixture-1"));
+    const squadSeed = Buffer.from(marketIdentitySeed("fixture-1", "squad-1"));
+    assert.equal(publicSeed.length, 32);
+    assert.deepEqual(publicSeed, samePublicSeed);
+    assert.notDeepEqual(publicSeed, squadSeed);
+  });
+
+  it("converts decimal stake amounts exactly", () => {
+    assert.equal(amountToBaseUnits(10.25), 10_250_000n);
+    assert.throws(() => amountToBaseUnits(0.0000001), /decimal places/);
+    assert.throws(() => amountToBaseUnits(0), /positive/);
+  });
+
+  it("rejects outcomes from the wrong market type", () => {
+    assert.equal(outcomeToU8("total_goals", "over"), 0);
+    assert.throws(() => outcomeToU8("total_goals", "home"), /Invalid outcome/);
   });
 });
 

@@ -7,6 +7,7 @@ import {
   MarketType,
   Position,
   Squad,
+  amountToBaseUnits,
   impliedShares,
   payoutForPosition,
   resolveMatchResult,
@@ -21,6 +22,7 @@ import {
   reconcileStateMarkets,
   type MarketReconcileOptions,
 } from "./lifecycle";
+import { settleMarketOnchain, voidMarketOnchain } from "../settlement/onchain";
 
 function defaultOutcomes(marketType: MarketType): Record<string, number> {
   if (marketType === "match_result") return { home: 0, draw: 0, away: 0 };
@@ -89,6 +91,7 @@ export function ensureMarket(
     s.markets[market.id] = market;
   }, "market", market, { durable: opts?.durable !== false });
   recordMarketPrice(market.id);
+
   return market;
 }
 
@@ -104,6 +107,61 @@ export function deposit(req: DepositRequest): { market: MarketPool; position: Po
   }
   if (!(req.outcome in market.outcomes)) throw new Error("invalid outcome");
 
+  if (req.txSignature) {
+    const replay = Object.values(state.positions).find((candidate) =>
+      candidate.deposits?.some((entry) => entry.txSignature === req.txSignature) ||
+      (!candidate.claimed && candidate.txSignature === req.txSignature)
+    );
+    if (replay) {
+      const entry = replay.deposits?.find(
+        (candidate) => candidate.txSignature === req.txSignature
+      ) || { txSignature: replay.txSignature!, amount: replay.amount };
+      if (
+        replay.marketId !== market.id ||
+        replay.owner !== req.owner ||
+        replay.outcome !== req.outcome ||
+        entry.amount !== req.amount
+      ) {
+        throw new Error("deposit transaction was already recorded with different details");
+      }
+      return { market: getState().markets[market.id], position: replay };
+    }
+
+    const existing = Object.values(state.positions).find(
+      (candidate) =>
+        candidate.marketId === market.id &&
+        candidate.owner === req.owner &&
+        !candidate.claimed &&
+        Boolean(candidate.deposits?.length || candidate.txSignature)
+    );
+    if (existing) {
+      if (existing.outcome !== req.outcome) {
+        throw new Error("an on-chain position cannot switch outcomes after its first stake");
+      }
+      mutate((next) => {
+        const nextMarket = next.markets[req.marketId];
+        nextMarket.outcomes[req.outcome] += req.amount;
+        nextMarket.totalPool += req.amount;
+        const nextPosition = next.positions[existing.id];
+        const previousDeposits = nextPosition.deposits ||
+          (nextPosition.txSignature
+            ? [{ txSignature: nextPosition.txSignature, amount: nextPosition.amount }]
+            : []);
+        nextPosition.amount += req.amount;
+        nextPosition.deposits = [
+          ...previousDeposits,
+          { txSignature: req.txSignature!, amount: req.amount },
+        ];
+        delete nextPosition.txSignature;
+      }, "deposit", { marketId: market.id, positionId: existing.id }, { durable: true });
+      recordMarketPrice(req.marketId);
+      return {
+        market: getState().markets[req.marketId],
+        position: getState().positions[existing.id],
+      };
+    }
+  }
+
   const position: Position = {
     id: randomUUID(),
     marketId: market.id,
@@ -111,6 +169,9 @@ export function deposit(req: DepositRequest): { market: MarketPool; position: Po
     outcome: req.outcome,
     amount: req.amount,
     claimed: false,
+    deposits: req.txSignature
+      ? [{ txSignature: req.txSignature, amount: req.amount }]
+      : undefined,
     createdAt: Date.now(),
   };
 
@@ -163,6 +224,21 @@ export function settleMarketOffchain(
   return getState().markets[marketId];
 }
 
+export async function settleMarketVerified(
+  marketId: string,
+  homeScore: number,
+  awayScore: number,
+  onchainEnabled: boolean
+) {
+  const market = getState().markets[marketId];
+  if (!market) throw new Error("market not found");
+  let signature: string | undefined;
+  if (onchainEnabled && market.totalPool > 0) {
+    signature = (await settleMarketOnchain(market, homeScore, awayScore)).signature;
+  }
+  return settleMarketOffchain(marketId, homeScore, awayScore, signature);
+}
+
 export function voidMarket(marketId: string, reason = "match abandoned") {
   const market = getState().markets[marketId];
   if (!market) throw new Error("market not found");
@@ -175,6 +251,19 @@ export function voidMarket(marketId: string, reason = "match abandoned") {
   }, "void", { marketId, reason }, { durable: true });
 
   return getState().markets[marketId];
+}
+
+export async function voidMarketWithRail(
+  marketId: string,
+  reason: string,
+  onchainEnabled: boolean
+) {
+  const market = getState().markets[marketId];
+  if (!market) throw new Error("market not found");
+  if (onchainEnabled && market.totalPool > 0) {
+    await voidMarketOnchain(market);
+  }
+  return voidMarket(marketId, reason);
 }
 
 export function voidMarketsForFixture(fixtureId: string, reason?: string) {
@@ -203,6 +292,24 @@ export function voidMarketsForFixture(fixtureId: string, reason?: string) {
   return marketIds.map((marketId) => getState().markets[marketId]).filter(Boolean);
 }
 
+export async function voidMarketsForFixtureWithRail(
+  fixtureId: string,
+  reason: string,
+  onchainEnabled: boolean
+) {
+  const markets = Object.values(getState().markets).filter(
+    (market) =>
+      market.fixtureId === fixtureId &&
+      (market.status === "open" || market.status === "locked")
+  );
+  if (onchainEnabled) {
+    for (const market of markets) {
+      if (market.totalPool > 0) await voidMarketOnchain(market);
+    }
+  }
+  return voidMarketsForFixture(fixtureId, reason);
+}
+
 export function lockMarket(marketId: string) {
   const market = getState().markets[marketId];
   if (!market) throw new Error("market not found");
@@ -213,7 +320,12 @@ export function lockMarket(marketId: string) {
   return getState().markets[marketId];
 }
 
-export function claimPosition(positionId: string, owner: string) {
+export function claimPosition(
+  positionId: string,
+  owner: string,
+  txSignature?: string,
+  feeBps = 0
+) {
   const state = getState();
   const position = state.positions[positionId];
   if (!position) throw new Error("position not found");
@@ -226,6 +338,7 @@ export function claimPosition(positionId: string, owner: string) {
     const payout = position.amount;
     mutate((s) => {
       s.positions[positionId].claimed = true;
+      s.positions[positionId].claimTxSignature = txSignature;
     }, "claim", { positionId, payout, refund: true }, { durable: true });
     return { position: getState().positions[positionId], payout, won: false, refund: true };
   }
@@ -234,19 +347,34 @@ export function claimPosition(positionId: string, owner: string) {
   if (!market.winningOutcome) throw new Error("no winning outcome");
 
   const won = position.outcome === market.winningOutcome;
-  const payout = won
+  const grossPayout = won
     ? payoutForPosition(
         position.amount,
         market.outcomes[market.winningOutcome] || 0,
         market.totalPool
       )
     : 0;
+  // Match on-chain integer fee math: fee = floor(gross_base * bps / 10_000).
+  const fee =
+    feeBps > 0 && grossPayout > 0
+      ? Number((amountToBaseUnits(grossPayout) * BigInt(feeBps)) / 10_000n) /
+        1_000_000
+      : 0;
+  const payout = grossPayout - fee;
 
   mutate((s) => {
     s.positions[positionId].claimed = true;
-  }, "claim", { positionId, payout }, { durable: true });
+    s.positions[positionId].claimTxSignature = txSignature;
+  }, "claim", { positionId, payout, grossPayout, fee }, { durable: true });
 
-  return { position: getState().positions[positionId], payout, won, refund: false };
+  return {
+    position: getState().positions[positionId],
+    payout,
+    grossPayout,
+    fee,
+    won,
+    refund: false,
+  };
 }
 
 export function createSquad(name: string, creator: string): Squad {

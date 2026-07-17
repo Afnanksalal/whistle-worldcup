@@ -3,6 +3,7 @@
 # Serves web + /api + /ws via Caddy (tunnel :8088 and/or TLS :9444).
 #
 # Required in .env: TXLINE_API_TOKEN, ADMIN_API_KEY (≥16 chars)
+# Add docker-compose.onchain.yml through COMPOSE_FILE for USDC settlement.
 
 services:
   api:
@@ -17,6 +18,12 @@ services:
       PORT: "4000"
       NODE_ENV: production
       KEEP_SETTLE_ENABLED: "true"
+      # Fail closed: ledger/play-units unless docker-compose.onchain.yml overrides.
+      STAKE_ASSET: ${STAKE_ASSET:-units}
+      SETTLEMENT_RAIL: ${SETTLEMENT_RAIL:-ledger}
+      ENABLE_ONCHAIN_SETTLEMENT: ${ENABLE_ONCHAIN_SETTLEMENT:-false}
+      PLATFORM_FEE_BPS: ${PLATFORM_FEE_BPS:-250}
+      USDC_MINT: ${USDC_MINT:-}
       API_CORS_ORIGIN: ${API_CORS_ORIGIN:-same-origin}
       TXLINE_NETWORK: ${TXLINE_NETWORK:-devnet}
       TXLINE_API_ORIGIN: ${TXLINE_API_ORIGIN:-https://txline-dev.txodds.com}
@@ -115,6 +122,17 @@ services:
       - whistle
     profiles:
       - tunnel
+
+  named-tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run --token ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - caddy
+    networks:
+      - whistle
+    profiles:
+      - named-tunnel
 
 networks:
   whistle:

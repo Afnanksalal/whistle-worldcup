@@ -5,6 +5,8 @@ export type MarketReconcileOptions = {
   now?: number;
   /** True only while the active fixture source is TxLINE and validation is reachable. */
   resultVerificationAvailable: boolean;
+  /** Keep funded pools locked until their on-chain state can be changed first. */
+  deferStakedVoids?: boolean;
 };
 
 export type MarketReconcileSummary = {
@@ -131,7 +133,11 @@ export function reconcileStateMarkets(
         }
         if (hasStake) {
           summary.preservedWithStake += 1;
-          if (voidActiveMarket(market, now)) summary.voided += 1;
+          if (options.deferStakedVoids) {
+            if (lockOpenMarket(market)) summary.locked += 1;
+          } else if (voidActiveMarket(market, now)) {
+            summary.voided += 1;
+          }
         } else {
           deleteMarket(state, market.id);
           summary.deleted += 1;
@@ -161,6 +167,8 @@ export function reconcileStateMarkets(
           (fixture.status === "scheduled" && fixture.kickoffTs <= now));
 
       if (canAwaitVerifiedResult || reachedCutoff) {
+        if (lockOpenMarket(market)) summary.locked += 1;
+      } else if (options.deferStakedVoids) {
         if (lockOpenMarket(market)) summary.locked += 1;
       } else if (voidActiveMarket(market, now)) {
         // Orphaned, cancelled, postponed, unknown, or non-TxLINE finished markets refund.

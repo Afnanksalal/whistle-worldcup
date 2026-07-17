@@ -15,6 +15,9 @@
     "dev": "tsc -p tsconfig.json --watch",
     "test": "npm run build && node --test dist/resolution.test.js"
   },
+  "dependencies": {
+    "@noble/hashes": "^1.8.0"
+  },
   "devDependencies": {
     "@types/node": "^22.13.10",
     "typescript": "^5.8.2"

@@ -1,6 +1,9 @@
 import { isFinalScoreRecord } from "@whistle/shared";
 import { getState } from "../store";
-import { settleMarketOffchain, voidMarketsForFixture } from "../markets/service";
+import {
+  settleMarketVerified,
+  voidMarketsForFixtureWithRail,
+} from "../markets/service";
 import {
   TxlineConfig,
   fetchHistoricalScores,
@@ -11,10 +14,16 @@ import { getLogger, markSettle } from "../observability";
 
 let txlineCfg: TxlineConfig | null = null;
 let settleEnabled = true;
+let onchainEnabled = false;
 
-export function configureKeeper(cfg: TxlineConfig | null, enabled: boolean) {
+export function configureKeeper(
+  cfg: TxlineConfig | null,
+  enabled: boolean,
+  useOnchain = false
+) {
   txlineCfg = cfg;
   settleEnabled = enabled;
+  onchainEnabled = useOnchain;
 }
 
 export type SettlementAttempt = {
@@ -60,10 +69,11 @@ export async function maybeSettleFixture(
   );
   if (!markets.length) return { status: "noop" };
 
-  const refundUnverified = (reason: string): SettlementAttempt => {
-    const voided = voidMarketsForFixture(
+  const refundUnverified = async (reason: string): Promise<SettlementAttempt> => {
+    const voided = await voidMarketsForFixtureWithRail(
       fixtureId,
-      reason
+      reason,
+      onchainEnabled
     );
     log.warn(
       { fixtureId, markets: voided.length, reason },
@@ -73,7 +83,7 @@ export async function maybeSettleFixture(
   };
 
   if (!txlineCfg?.apiToken) {
-    return refundUnverified("TxLINE result verification unavailable");
+    return await refundUnverified("TxLINE result verification unavailable");
   }
 
   let canonicalHome: number;
@@ -97,7 +107,7 @@ export async function maybeSettleFixture(
     const seq = final ? sequenceFrom(final.raw) : null;
     if (!final?.update || seq === null) {
       log.warn({ fixtureId }, "TxLINE final record/sequence not available yet");
-      return refundUnverified("TxLINE final record unavailable");
+      return await refundUnverified("TxLINE final record unavailable");
     }
 
     const validation = await fetchStatValidationV2(txlineCfg, fixtureId, seq, [
@@ -107,7 +117,7 @@ export async function maybeSettleFixture(
     ]);
     if (!validationPresent(validation)) {
       log.warn({ fixtureId, seq }, "TxLINE validation payload empty");
-      return refundUnverified("TxLINE validation unavailable");
+      return await refundUnverified("TxLINE validation unavailable");
     }
 
     canonicalHome = final.update.homeScore;
@@ -125,14 +135,23 @@ export async function maybeSettleFixture(
     }
   } catch (err) {
     log.warn({ err, fixtureId }, "TxLINE settlement verification failed");
-    return refundUnverified("TxLINE validation unavailable");
+    return await refundUnverified("TxLINE validation unavailable");
   }
 
   for (const market of markets) {
-    settleMarketOffchain(market.id, canonicalHome, canonicalAway);
+    await settleMarketVerified(
+      market.id,
+      canonicalHome,
+      canonicalAway,
+      onchainEnabled
+    );
     markSettle();
     log.info(
-      { marketId: market.id, fixtureId, mode: "verified-ledger" },
+      {
+        marketId: market.id,
+        fixtureId,
+        mode: onchainEnabled ? "verified-onchain" : "verified-ledger",
+      },
       "settled market from verified TxLINE final"
     );
   }
