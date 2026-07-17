@@ -57,6 +57,24 @@ Browser → Next.js (VPS) → Caddy → Whistle API
 
 Networks: **devnet** `https://txline-dev.txodds.com` or **mainnet** free tiers.
 
+### Getting a real token
+
+`npm run activate-txline -w @whistle/api` runs the full World Cup free-tier flow
+end to end: it loads/generates the wallet at `SOLANA_KEYPAIR_PATH`, funds it
+(devnet airdrop, best effort), sends the on-chain `subscribe(serviceLevelId, weeks)`
+transaction (creating the wallet's Token-2022 TxL ATA if needed), then signs
+`${txSig}:${leagues}:${jwt}` and calls `POST /api/token/activate`. It prints the
+resulting token — put it in `TXLINE_API_TOKEN` (never commit it). When the token
+is already set it only smoke-tests `/api/fixtures/snapshot`. Tune with
+`TXLINE_SERVICE_LEVEL_ID` (default 1), `TXLINE_DURATION_WEEKS` (default 4), and
+`TXLINE_LEAGUES`.
+
+### Fixture normalization
+
+TxLINE fixtures arrive as `Participant1`/`Participant2` with a `Participant1IsHome`
+flag; `normalizeFixture` maps these to `home`/`away` (honoring the flag) so live
+schedule cards show real team names, falling back to nested `home`/`team1` shapes.
+
 ## Public product API (Whistle)
 
 | Endpoint | Notes |
