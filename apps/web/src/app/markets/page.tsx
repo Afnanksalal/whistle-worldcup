@@ -28,8 +28,10 @@ type BoardResponse = {
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
-function typeLabel(type: string, line?: number) {
-  if (type === "match_result") return "1X2";
+function typeLabel(type: string, line?: number, outcomes?: Record<string, number>) {
+  if (type === "match_result") {
+    return outcomes && !("draw" in outcomes) ? "To advance" : "1X2";
+  }
   if (type === "total_goals") return line != null ? `O/U ${line}` : "O/U goals";
   if (type === "total_corners") return line != null ? `Corners ${line}` : "Corners";
   if (type === "first_scorer") return "First scorer";
@@ -124,7 +126,7 @@ export default function MarketsBoardPage() {
                           : ""}
                       </small>
                     </td>
-                    <td>{typeLabel(row.marketType, row.line)}</td>
+                    <td>{typeLabel(row.marketType, row.line, row.implied)}</td>
                     <td>
                       <span className={`status-chip is-${row.status}`}>{row.status}</span>
                     </td>

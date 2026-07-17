@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Fixture, MarketOutcome, MatchForecast } from "@whistle/shared";
-import { impliedShares } from "@whistle/shared";
+import { impliedShares, isKnockoutMatchResult } from "@whistle/shared";
 import { api, statusLabel } from "../../../lib/api";
 import { useIdentity } from "../../../lib/identity";
 import {
@@ -31,8 +31,15 @@ const OUTCOME_LABELS: Record<string, string> = {
   none: "No goal",
 };
 
-function marketTabLabel(type: string, line?: number) {
-  if (type === "match_result") return "1X2";
+function marketTabLabel(
+  type: string,
+  line?: number,
+  outcomes?: Record<string, number>,
+  knockout = false
+) {
+  if (type === "match_result") {
+    return knockout || (outcomes && !("draw" in outcomes)) ? "To advance" : "1X2";
+  }
   if (type === "total_goals") return line != null ? `Goals ${line}` : "Goals";
   if (type === "total_corners") return line != null ? `Corners ${line}` : "Corners";
   if (type === "first_scorer") return "First scorer";
@@ -41,6 +48,21 @@ function marketTabLabel(type: string, line?: number) {
 }
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
+
+function friendlyStakeError(cause: unknown): string {
+  const message = cause instanceof Error ? cause.message : String(cause || "");
+  if (
+    /0x177d/i.test(message) ||
+    /OutcomeCannotChange/i.test(message) ||
+    /cannot switch outcomes/i.test(message)
+  ) {
+    return "This wallet already has a pick on the other side of this market. Add to the same outcome, or use another wallet.";
+  }
+  if (/Simulation failed/i.test(message) && message.length > 220) {
+    return "The on-chain stake could not be simulated. Check your USDC balance and try again.";
+  }
+  return message || "The prediction could not be confirmed.";
+}
 
 function outcomeName(outcome: string, fixture: Fixture, marketType?: string) {
   if (marketType === "first_scorer") {
@@ -162,15 +184,20 @@ export default function MatchPageInner({
   const shares = market ? impliedShares(market.outcomes) : {};
   const history = market ? data?.priceHistory?.[market.id] || [] : [];
 
+  const knockoutResult =
+    !!data &&
+    !!market &&
+    market.marketType === "match_result" &&
+    isKnockoutMatchResult(data.fixture);
+
   const chartLabels = useMemo(() => {
     if (!data || !market) return {};
     return Object.fromEntries(
-      Object.keys(market.outcomes).map((key) => [
-        key,
-        outcomeName(key, data.fixture, market.marketType),
-      ])
+      Object.keys(market.outcomes)
+        .filter((key) => !(knockoutResult && key === "draw"))
+        .map((key) => [key, outcomeName(key, data.fixture, market.marketType)])
     );
-  }, [data, market]);
+  }, [data, market, knockoutResult]);
 
   const quote = useMemo(() => {
     if (!market || !selectedOutcome || !Number.isFinite(amount) || amount <= 0) return null;
@@ -203,7 +230,19 @@ export default function MatchPageInner({
         if (!meta.whistleProgramId || !meta.usdcMint) {
           throw new Error("On-chain staking configuration is unavailable");
         }
-        await api(`/markets/${market.id}/prepare`, { method: "POST" });
+        try {
+          await api(`/markets/${market.id}/prepare`, { method: "POST" });
+        } catch (prepareError) {
+          const message =
+            prepareError instanceof Error ? prepareError.message : String(prepareError);
+          // One automatic retry helps when public Solana RPC rate-limits create_market.
+          if (message.includes("could not be prepared") || message.includes("429")) {
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+            await api(`/markets/${market.id}/prepare`, { method: "POST" });
+          } else {
+            throw prepareError;
+          }
+        }
 
         txSignature = await depositOnchain({
           programId: meta.whistleProgramId,
@@ -232,7 +271,7 @@ export default function MatchPageInner({
     } catch (cause) {
       setNotice({
         tone: "error",
-        text: cause instanceof Error ? cause.message : "The prediction could not be confirmed.",
+        text: friendlyStakeError(cause),
       });
     } finally {
       setBusy(false);
@@ -398,7 +437,11 @@ export default function MatchPageInner({
 
           <ForecastPanel forecast={data.forecast} fixture={fixture} />
 
-          <PredictionChart history={history} labels={chartLabels} />
+          <PredictionChart
+            history={history}
+            labels={chartLabels}
+            omitKeys={knockoutResult ? ["draw"] : []}
+          />
 
           <div className="match-intelligence-grid">
             <MatchStatsPanel
@@ -458,15 +501,36 @@ export default function MatchPageInner({
                       setNotice(null);
                     }}
                   >
-                    {marketTabLabel(item.marketType, item.line)}
+                    {marketTabLabel(
+                      item.marketType,
+                      item.line,
+                      item.outcomes,
+                      item.marketType === "match_result" &&
+                        isKnockoutMatchResult(fixture)
+                    )}
                   </button>
                 ))}
               </div>
 
               {market && (
                 <>
+                  {market.marketType === "match_result" &&
+                    isKnockoutMatchResult(fixture) && (
+                      <p className="knockout-market-note">
+                        Knockout tie — no draw. Winner after extra time / penalties advances.
+                      </p>
+                    )}
                   <div className="outcome-options">
-                    {Object.keys(market.outcomes).map((outcome) => {
+                    {Object.keys(market.outcomes)
+                      .filter(
+                        (outcome) =>
+                          !(
+                            market.marketType === "match_result" &&
+                            isKnockoutMatchResult(fixture) &&
+                            outcome === "draw"
+                          )
+                      )
+                      .map((outcome) => {
                       const active = selectedOutcome === outcome;
                       const outcomePool = market.outcomes[outcome] || 0;
                       const currentReturn = outcomePool > 0 ? market.totalPool / outcomePool : 0;

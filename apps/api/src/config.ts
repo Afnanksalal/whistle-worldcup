@@ -18,6 +18,8 @@ export type AppConfig = {
   platformFeeBps: number;
   logLevel: string;
   rateLimitPerMin: number;
+  /** Playground-only: mint demo USDC + SOL to connected wallets. */
+  demoWalletEnabled: boolean;
 };
 
 function truthy(v: string | undefined): boolean {
@@ -144,6 +146,10 @@ export function loadConfig(): AppConfig {
     platformFeeBps,
     logLevel: process.env.LOG_LEVEL || (isProd ? "info" : "debug"),
     rateLimitPerMin: Number(process.env.RATE_LIMIT_PER_MIN || 120),
+    demoWalletEnabled:
+      truthy(process.env.ENABLE_DEMO_WALLET) &&
+      onchainSettlementEnabled &&
+      network !== "mainnet",
   };
 }
 
@@ -169,5 +175,6 @@ export function publicMeta(cfg: AppConfig, fixtureSource?: string) {
     keepSettleEnabled: cfg.keepSettleEnabled,
     newsConfigured: true,
     newsSource: "rss" as const,
+    demoWalletEnabled: cfg.demoWalletEnabled,
   };
 }

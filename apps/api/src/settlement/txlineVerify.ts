@@ -50,11 +50,18 @@ export async function verifyValidationAgainstChain(
     };
   }
 
-  const rpc = opts?.rpcUrl || net.rpcUrl;
+  const rpc =
+    opts?.rpcUrl ||
+    process.env.SOLANA_RPC_URL?.trim() ||
+    net.rpcUrl;
   try {
-    const connection = new Connection(rpc, "confirmed");
+    const connection = new Connection(rpc, {
+      commitment: "confirmed",
+      disableRetryOnRateLimit: false,
+    });
     const info = await connection.getAccountInfo(
-      new PublicKey(merkle.dailyScoresPda)
+      new PublicKey(merkle.dailyScoresPda),
+      "confirmed"
     );
     if (!info) {
       log.warn(

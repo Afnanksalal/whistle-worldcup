@@ -7,6 +7,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { NAV_LINKS, type NavIcon } from "../lib/nav";
 import { useRuntime } from "../lib/runtime";
 import { BrandMark } from "./BrandMark";
+import { DemoWalletFund } from "./DemoWalletFund";
 
 function NavGlyph({ name }: { name: NavIcon }) {
   return (
@@ -160,6 +161,7 @@ export function Nav() {
                   ? "Live match feed"
                   : "Schedule preview"}
             </span>
+            <DemoWalletFund />
             <MountedWalletButton />
           </div>
         </div>

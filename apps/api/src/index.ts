@@ -170,7 +170,7 @@ async function main() {
     })
     .catch(() => undefined);
 
-  timers.push(startKeeperLoop(15_000));
+  timers.push(startKeeperLoop(45_000));
 
   const app = express();
   app.disable("x-powered-by");

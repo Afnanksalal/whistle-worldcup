@@ -29,6 +29,7 @@ describe("TxLINE normalization safety", () => {
       FixtureId: 18257865,
       Competition: "World Cup",
       StartTime: kickoff,
+      FixtureGroupId: 10115676,
       Participant1: "Brazil",
       Participant1Id: 1634,
       Participant2: "Argentina",
@@ -39,6 +40,7 @@ describe("TxLINE normalization safety", () => {
     assert.equal(home.id, "18257865");
     assert.equal(home.home.name, "Brazil");
     assert.equal(home.away.name, "Argentina");
+    assert.equal(home.fixtureGroupId, "10115676");
     assert.equal(home.kickoffTs, kickoff);
 
     const swapped = normalizeFixture({

@@ -15,6 +15,7 @@ import {
   timeZoneLabel,
   useLocalTimeContext,
 } from "../lib/local-time";
+import { isKnockoutMatchResult } from "@whistle/shared";
 import { useRuntime, type AppMeta } from "../lib/runtime";
 import { FootballLoader } from "./FootballLoader";
 import { TeamCrest, teamShortCode } from "./TeamCrest";
@@ -282,7 +283,12 @@ export function FixtureBoard({
                     <span>{featuredResult?.status === "open" ? "Open" : featuredResult?.status || "View"}</span>
                   </div>
                   <div className="featured-outcomes">
-                    {(["home", "draw", "away"] as const).map((outcome) => (
+                    {Object.keys(featuredResult?.outcomes || { home: 0, away: 0 })
+                      .filter(
+                        (outcome) =>
+                          !(isKnockoutMatchResult(featured) && outcome === "draw")
+                      )
+                      .map((outcome) => (
                       <div key={outcome}>
                         <span>
                           {outcome === "home"
@@ -447,10 +453,25 @@ export function FixtureBoard({
                     </div>
 
                     <div className="fixture-prices" aria-label="Current pool shares">
-                      {(["home", "draw", "away"] as const).map((outcome) => (
+                      {Object.keys(resultMarket?.outcomes || { home: 0, away: 0 })
+                        .filter(
+                          (outcome) =>
+                            !(isKnockoutMatchResult(fixture) && outcome === "draw")
+                        )
+                        .map((outcome) => (
                         <span key={outcome}>
-                          <small>{outcome === "draw" ? "Draw" : outcome === "home" ? "Home" : "Away"}</small>
-                          <strong>{hasResultLiquidity ? `${Math.round((shares[outcome] || 0) * 100)}%` : "—"}</strong>
+                          <small>
+                            {outcome === "draw"
+                              ? "Draw"
+                              : outcome === "home"
+                                ? "Home"
+                                : "Away"}
+                          </small>
+                          <strong>
+                            {hasResultLiquidity
+                              ? `${Math.round((shares[outcome] || 0) * 100)}%`
+                              : "—"}
+                          </strong>
                         </span>
                       ))}
                     </div>

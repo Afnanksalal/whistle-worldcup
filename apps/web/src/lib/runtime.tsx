@@ -24,6 +24,7 @@ export type AppMeta = {
   fixtureSource?: "txline" | "thesportsdb";
   keepSettleEnabled: boolean;
   newsConfigured?: boolean;
+  demoWalletEnabled?: boolean;
 };
 
 const defaultMeta: AppMeta = {
@@ -38,6 +39,7 @@ const defaultMeta: AppMeta = {
   txlineConfigured: false,
   fixtureSource: "thesportsdb",
   keepSettleEnabled: true,
+  demoWalletEnabled: false,
 };
 
 type Ctx = {

@@ -277,11 +277,19 @@ export function normalizeFixture(raw: unknown): Fixture | null {
     pickNumber(nestedScore || {}, ["away", "Away"]) ??
     fromTxline.away;
 
+  const fixtureGroupIdRaw =
+    pickString(o, ["fixtureGroupId", "FixtureGroupId"]) ??
+    pickNumber(o, ["fixtureGroupId", "FixtureGroupId"]);
+
   return {
     id,
     competition: pickString(o, ["competition", "Competition", "league", "competitionName"]),
     round: pickString(o, ["round", "Round", "stage"]),
     group: pickString(o, ["group", "Group", "groupName"]),
+    fixtureGroupId:
+      fixtureGroupIdRaw === undefined || fixtureGroupIdRaw === null
+        ? undefined
+        : String(fixtureGroupIdRaw),
     kickoffTs: kickoff,
     status,
     home,

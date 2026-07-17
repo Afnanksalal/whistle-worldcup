@@ -31,6 +31,7 @@ import {
   verifyClaimTx,
   verifyDepositTx,
 } from "./settlement/onchain";
+import { fundDemoWallet } from "./settlement/demoFund";
 import { isFixtureStakeable } from "./markets/lifecycle";
 import type { AppConfig } from "./config";
 import { publicMeta } from "./config";
@@ -119,6 +120,26 @@ export function createRouter(cfg: AppConfig) {
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json(parsed.error.flatten());
     res.json(issueChallenge(parsed.data.wallet));
+  });
+
+  router.post("/demo/fund", async (req, res) => {
+    if (!cfg.demoWalletEnabled) {
+      return res.status(404).json({ error: "demo wallet funding is disabled" });
+    }
+    const schema = z.object({
+      wallet: z.string().min(32).max(64),
+      usdcAmount: z.number().positive().max(5_000).optional(),
+    });
+    const parsed = schema.safeParse(req.body);
+    if (!parsed.success) return res.status(400).json(parsed.error.flatten());
+    try {
+      const funded = await fundDemoWallet(parsed.data);
+      res.json(funded);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      req.log?.error({ err: error, detail }, "demo wallet funding failed");
+      res.status(503).json({ error: "demo wallet funding failed", detail });
+    }
   });
 
   router.get("/fixtures", (req, res) => {
@@ -402,6 +423,16 @@ export function createRouter(cfg: AppConfig) {
     if (market.status !== "open" || !isFixtureStakeable(fixture)) {
       return res.status(409).json({ error: "market is closed" });
     }
+    if (
+      market.marketType !== "match_result" &&
+      market.marketType !== "total_goals" &&
+      market.marketType !== "total_corners"
+    ) {
+      return res.status(409).json({
+        error: "this market type settles off-chain only",
+        marketType: market.marketType,
+      });
+    }
     try {
       const prepared = await ensureMarketOnchain(market, fixture.kickoffTs);
       res.json({
@@ -410,8 +441,12 @@ export function createRouter(cfg: AppConfig) {
         usdcMint: cfg.usdcMint,
       });
     } catch (error) {
-      req.log?.error({ err: error, marketId: market.id }, "on-chain market preparation failed");
-      res.status(503).json({ error: "on-chain market could not be prepared" });
+      const detail = error instanceof Error ? error.message : String(error);
+      req.log?.error({ err: error, marketId: market.id, detail }, "on-chain market preparation failed");
+      res.status(503).json({
+        error: "on-chain market could not be prepared",
+        detail,
+      });
     }
   });
 

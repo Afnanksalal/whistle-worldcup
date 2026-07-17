@@ -31,6 +31,8 @@ export interface Fixture {
   competition?: string;
   round?: string;
   group?: string;
+  /** TxLINE FixtureGroupId — used to infer group vs knockout when labels are absent. */
+  fixtureGroupId?: string;
   kickoffTs: number;
   status: "scheduled" | "live" | "finished" | "postponed" | "cancelled" | "unknown";
   home: FixtureTeam;
@@ -492,3 +494,11 @@ export function onchainMarketTypeU8(marketType: MarketType): number | null {
   if (marketType === "total_corners") return 2;
   return null;
 }
+
+export {
+  competitionPhase,
+  enrichCompetitionPhases,
+  isKnockoutMatchResult,
+  roundLabelFromFixtureGroupSize,
+  type CompetitionPhase,
+} from "./competition";
