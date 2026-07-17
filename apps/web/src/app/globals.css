@@ -421,6 +421,38 @@ h3,
   display: none;
 }
 
+.demo-wallet-fund {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.demo-wallet-fund-btn {
+  min-height: 2.4rem !important;
+  padding: 0.35rem 0.7rem !important;
+  font-size: 0.72rem !important;
+}
+
+.demo-wallet-fund-note {
+  max-width: 9rem;
+  overflow: hidden;
+  color: var(--mute);
+  font-size: 0.68rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.knockout-market-note {
+  margin: 0 0 0.75rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid rgba(183, 148, 82, 0.35);
+  border-radius: var(--radius-sm);
+  background: rgba(183, 148, 82, 0.08);
+  color: var(--mute);
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
 .section-kicker,
 .eyebrow {
   margin: 0;
@@ -2485,20 +2517,48 @@ a.panel:hover {
   white-space: nowrap;
 }
 
+.pool-chart-sub {
+  margin: 0.25rem 0 0;
+  color: var(--mute);
+  font-size: 0.84rem;
+  line-height: 1.4;
+  max-width: 36rem;
+}
+
 .chart-legend {
   display: flex;
   margin-bottom: 0.65rem;
   align-items: center;
-  gap: 1rem;
+  gap: 0.55rem;
   flex-wrap: wrap;
 }
 
-.chart-legend > div {
+.chart-legend > div,
+.chart-legend-btn {
   display: inline-flex;
   align-items: center;
   gap: 0.35rem;
   color: var(--muted-strong);
   font-size: 0.6rem;
+}
+
+.chart-legend-btn {
+  appearance: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  padding: 0.28rem 0.45rem;
+  cursor: pointer;
+}
+
+.chart-legend-btn.is-active {
+  border-color: var(--forest);
+  background: var(--forest-soft);
+  color: var(--forest);
+}
+
+.chart-legend-btn.is-dim {
+  opacity: 0.45;
 }
 
 .chart-legend-dot {

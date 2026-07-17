@@ -130,6 +130,11 @@ export function reconcileStateMarkets(
         const hasStake = stakedIds.has(market.id);
         if (market.id === canonical.id) {
           if (hasStake) summary.preservedWithStake += 1;
+          // Temporary locks from source flips / deferred voids should reopen
+          // once the fixture is stakeable again before kickoff.
+          if (market.status === "locked") {
+            market.status = "open";
+          }
           continue;
         }
         if (hasStake) {

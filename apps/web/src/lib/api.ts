@@ -37,7 +37,16 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || res.statusText);
+    let message = text || res.statusText;
+    try {
+      const body = JSON.parse(text) as { error?: string; detail?: string };
+      if (body?.error) {
+        message = body.detail ? `${body.error}: ${body.detail}` : body.error;
+      }
+    } catch {
+      // keep raw text
+    }
+    throw new Error(message);
   }
   return res.json() as Promise<T>;
 }

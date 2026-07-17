@@ -2,6 +2,7 @@ import { EventSource } from "eventsource";
 import {
   Fixture,
   OddsQuote,
+  enrichCompetitionPhases,
   isFinalScoreRecord,
 } from "@whistle/shared";
 import {
@@ -31,6 +32,11 @@ import { isPlaceholderTxlineToken } from "../config";
 const log = () => getLogger().child({ module: "ingest" });
 
 export type FixtureSource = "txline" | "thesportsdb";
+
+/** Infer group vs knockout round labels from TxLINE FixtureGroupId cohorts. */
+function withCompetitionPhases(fixtures: Fixture[]): Fixture[] {
+  return enrichCompetitionPhases(fixtures);
+}
 
 let onchainEnabled = false;
 
@@ -92,7 +98,7 @@ async function loadPublicBoard(force = false) {
 
   publicBoardInFlight = (async () => {
     try {
-      const fixtures = await fetchPublicFixtures();
+      const fixtures = withCompetitionPhases(await fetchPublicFixtures());
       activeSource = "thesportsdb";
       mutate((s) => {
         wipeLegacyDemoIds(s);
@@ -127,7 +133,9 @@ export async function bootstrapFixtures(cfg: TxlineConfig | null) {
   if (cfg?.apiToken && !isPlaceholderTxlineToken(cfg.apiToken)) {
     // Prefer real TxLINE when token does not look like our local placeholder
     try {
-      const fixtures = await enrichFixturesWithTeamAssets(await fetchFixtures(cfg));
+      const fixtures = withCompetitionPhases(
+        await enrichFixturesWithTeamAssets(await fetchFixtures(cfg))
+      );
       if (!fixtures.length) throw new Error("TxLINE returned zero fixtures");
       activeSource = "txline";
       mutate((s) => {
@@ -210,7 +218,9 @@ export async function refreshFixtures(cfg: TxlineConfig | null) {
   if (shouldTryTxline && cfg) {
     lastTxlineRetryAt = Date.now();
     try {
-      const fixtures = await enrichFixturesWithTeamAssets(await fetchFixtures(cfg));
+      const fixtures = withCompetitionPhases(
+        await enrichFixturesWithTeamAssets(await fetchFixtures(cfg))
+      );
       if (!fixtures.length) throw new Error("TxLINE returned zero fixtures");
       activeSource = "txline";
       const alreadyScored = Object.entries(getState().fixtures)

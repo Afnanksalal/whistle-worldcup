@@ -313,6 +313,32 @@ async function marketStatus(
   return decodeMarketStatus(account.data);
 }
 
+async function withRpcRetry<T>(label: string, fn: () => Promise<T>, attempts = 8): Promise<T> {
+  let delay = 1_200;
+  let lastError: unknown;
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+      const message = String((error as Error)?.message || error);
+      const retryable =
+        message.includes("429") ||
+        message.includes("Too Many Requests") ||
+        message.includes("failed to get info about account") ||
+        message.includes("ECONNRESET") ||
+        message.includes("fetch failed") ||
+        message.includes("timed out");
+      if (!retryable || i === attempts) break;
+      await new Promise((resolve) => setTimeout(resolve, delay));
+      delay = Math.min(delay * 2, 20_000);
+    }
+  }
+  throw lastError instanceof Error
+    ? lastError
+    : new Error(`${label} failed: ${String(lastError)}`);
+}
+
 export async function ensureMarketOnchain(
   market: MarketPool,
   kickoffTs: number
@@ -326,7 +352,9 @@ export async function ensureMarketOnchain(
     market.line,
     market.squadId
   );
-  const existingStatus = await marketStatus(connection, programId, marketPda);
+  const existingStatus = await withRpcRetry("market status", () =>
+    marketStatus(connection, programId, marketPda)
+  );
   if (existingStatus !== null) {
     return { marketPda: marketPda.toBase58(), created: false };
   }
@@ -345,11 +373,13 @@ export async function ensureMarketOnchain(
     ],
     data: buildCreateMarketData(market, kickoffTs),
   });
-  const signature = await sendAndConfirmTransaction(
-    connection,
-    new Transaction().add(instruction),
-    [authority],
-    { commitment: "confirmed" }
+  const signature = await withRpcRetry("create market", () =>
+    sendAndConfirmTransaction(
+      connection,
+      new Transaction().add(instruction),
+      [authority],
+      { commitment: "confirmed", maxRetries: 5 }
+    )
   );
   return { marketPda: marketPda.toBase58(), created: true, signature };
 }

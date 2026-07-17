@@ -163,13 +163,19 @@ export async function maybeSettleFixture(
     }
 
     merkle = extractMerkleSummary(validation, network);
-    const chain = await verifyValidationAgainstChain(validation, { network });
-    onchainProofVerified = chain.ok;
-    if (!chain.ok) {
-      log.warn(
-        { fixtureId, seq, reason: chain.reason, pda: chain.dailyScoresPda },
-        "on-chain Merkle root check did not pass; settling with REST validation + receipt"
-      );
+    const hasOnchainStake = fixtureMarkets.some((market) => market.totalPool > 0);
+    if (hasOnchainStake) {
+      const chain = await verifyValidationAgainstChain(validation, {
+        network,
+        rpcUrl: process.env.SOLANA_RPC_URL?.trim(),
+      });
+      onchainProofVerified = chain.ok;
+      if (!chain.ok) {
+        log.warn(
+          { fixtureId, seq, reason: chain.reason, pda: chain.dailyScoresPda },
+          "on-chain Merkle root check did not pass; settling with REST validation + receipt"
+        );
+      }
     }
 
     canonicalHome = final.update.homeScore;
@@ -276,22 +282,37 @@ export async function maybeSettleFixture(
 
 export async function runKeeperPass() {
   const state = getState();
-  for (const live of Object.values(state.live)) {
+  // Only touch fixtures that still have settleable markets. Sweeping every
+  // finished World Cup score against public Solana RPC rate-limits create_market
+  // / deposit prepare for live bettors.
+  const pendingFixtureIds = new Set<string>();
+  for (const market of Object.values(state.markets)) {
     if (
-      live.status === "finished" ||
-      isFinalScoreRecord({
-        action: live.action,
-        statusId: live.statusId,
-        period: live.period,
-      })
+      (market.status === "open" || market.status === "locked") &&
+      market.marketType !== "tournament_winner"
     ) {
-      await maybeSettleFixture(live.fixtureId, live.homeScore, live.awayScore);
+      pendingFixtureIds.add(market.fixtureId);
     }
   }
 
-  for (const f of Object.values(state.fixtures)) {
-    if (f.status === "finished" && f.score) {
-      await maybeSettleFixture(f.id, f.score.home, f.score.away);
+  for (const fixtureId of pendingFixtureIds) {
+    const live = state.live[fixtureId];
+    if (
+      live &&
+      (live.status === "finished" ||
+        isFinalScoreRecord({
+          action: live.action,
+          statusId: live.statusId,
+          period: live.period,
+        }))
+    ) {
+      await maybeSettleFixture(fixtureId, live.homeScore, live.awayScore);
+      continue;
+    }
+
+    const fixture = state.fixtures[fixtureId];
+    if (fixture?.status === "finished" && fixture.score) {
+      await maybeSettleFixture(fixtureId, fixture.score.home, fixture.score.away);
     }
   }
 }

@@ -9,6 +9,7 @@ import {
   Squad,
   amountToBaseUnits,
   impliedShares,
+  isKnockoutMatchResult,
   payoutForPosition,
   resolveCorners,
   resolveFirstScorer,
@@ -29,9 +30,13 @@ import { settleMarketOnchain, voidMarketOnchain } from "../settlement/onchain";
 
 function defaultOutcomes(
   marketType: MarketType,
-  teams?: string[]
+  teams?: string[],
+  opts?: { knockout?: boolean }
 ): Record<string, number> {
-  if (marketType === "match_result") return { home: 0, draw: 0, away: 0 };
+  if (marketType === "match_result") {
+    // FIFA knockout ties always produce a winner (ET / pens). No draw leg.
+    return opts?.knockout ? { home: 0, away: 0 } : { home: 0, draw: 0, away: 0 };
+  }
   if (marketType === "first_scorer") return { home: 0, away: 0, none: 0 };
   if (marketType === "tournament_winner") {
     const outcomes: Record<string, number> = {};
@@ -41,6 +46,27 @@ function defaultOutcomes(
     return outcomes;
   }
   return { over: 0, under: 0 };
+}
+
+function syncMatchResultOutcomes(market: MarketPool, knockout: boolean): MarketPool {
+  if (market.marketType !== "match_result") return market;
+  const wantsDraw = !knockout;
+  const hasDraw = "draw" in market.outcomes;
+  if (wantsDraw === hasDraw) return market;
+
+  // Only reshape empty markets so live stakes are never rewritten.
+  if (market.totalPool > 0 || Object.values(market.outcomes).some((v) => v > 0)) {
+    return market;
+  }
+
+  const nextOutcomes: Record<string, number> = wantsDraw
+    ? { home: market.outcomes.home || 0, draw: 0, away: market.outcomes.away || 0 }
+    : { home: market.outcomes.home || 0, away: market.outcomes.away || 0 };
+
+  mutate((s) => {
+    s.markets[market.id].outcomes = nextOutcomes;
+  }, "market", { id: market.id, outcomes: nextOutcomes }, { durable: true });
+  return getState().markets[market.id];
 }
 
 function stableMarketId(identity: string): string {
@@ -87,10 +113,17 @@ export function ensureMarket(
     line,
     squadId,
   });
+  const knockout =
+    req.marketType === "match_result" ? isKnockoutMatchResult(fixture) : false;
+
   const existing = Object.values(state.markets).find(
     (market) => marketIdentityKey(market) === identity
   );
-  if (existing) return existing;
+  if (existing) {
+    return req.marketType === "match_result"
+      ? syncMatchResultOutcomes(existing, knockout)
+      : existing;
+  }
 
   const market: MarketPool = {
     id: stableMarketId(identity),
@@ -98,7 +131,7 @@ export function ensureMarket(
     marketType: req.marketType,
     line,
     status: "open",
-    outcomes: defaultOutcomes(req.marketType),
+    outcomes: defaultOutcomes(req.marketType, undefined, { knockout }),
     totalPool: 0,
     createdAt: Date.now(),
     squadId,
@@ -214,6 +247,8 @@ export type SettleContext = {
   homeCorners?: number;
   awayCorners?: number;
   winningOutcome?: MarketOutcome;
+  /** Knockout advancer after ET/pens when regulation is level. */
+  advancingSide?: "home" | "away" | null;
 };
 
 export function settleMarketOffchain(
@@ -234,7 +269,24 @@ export function settleMarketOffchain(
   if (ctx.winningOutcome) {
     winning = ctx.winningOutcome;
   } else if (market.marketType === "match_result") {
-    winning = resolveMatchResult(homeScore, awayScore);
+    const fixture = getState().fixtures[market.fixtureId];
+    const knockout = fixture ? isKnockoutMatchResult(fixture) : !("draw" in market.outcomes);
+    if (knockout && homeScore === awayScore) {
+      if (ctx.advancingSide === "home" || ctx.advancingSide === "away") {
+        winning = ctx.advancingSide;
+      } else {
+        throw new Error(
+          "knockout match is level after regulation; needs an advancing side (ET/pens)"
+        );
+      }
+    } else {
+      winning = resolveMatchResult(homeScore, awayScore);
+    }
+    if (winning === "draw" && !("draw" in market.outcomes)) {
+      throw new Error(
+        "knockout match-result market has no draw outcome; needs an advancing side"
+      );
+    }
   } else if (market.marketType === "first_scorer") {
     winning = resolveFirstScorer(homeScore, awayScore, ctx.firstTeam);
   } else if (market.marketType === "total_corners") {
@@ -267,6 +319,23 @@ export async function settleMarketVerified(
 ) {
   const market = getState().markets[marketId];
   if (!market) throw new Error("market not found");
+  const fixture = getState().fixtures[market.fixtureId];
+  const knockout =
+    market.marketType === "match_result" &&
+    (fixture ? isKnockoutMatchResult(fixture) : !("draw" in market.outcomes));
+
+  // On-chain settle maps equal scores to draw — void instead for 2-way knockout markets.
+  if (
+    knockout &&
+    homeScore === awayScore &&
+    !(ctx.advancingSide === "home" || ctx.advancingSide === "away" || ctx.winningOutcome)
+  ) {
+    if (onchainEnabled && market.totalPool > 0) {
+      await voidMarketOnchain(market);
+    }
+    return voidMarket(marketId, "knockout level after regulation without advancing side");
+  }
+
   let signature: string | undefined;
   const onchainType =
     market.marketType === "match_result" ||
@@ -277,7 +346,15 @@ export async function settleMarketVerified(
       market.marketType === "total_corners" ? Math.round(ctx.homeCorners ?? 0) : homeScore;
     const onchainAway =
       market.marketType === "total_corners" ? Math.round(ctx.awayCorners ?? 0) : awayScore;
-    signature = (await settleMarketOnchain(market, onchainHome, onchainAway)).signature;
+    // When a knockout is settled via advancingSide after a level score, keep
+    // ledger settlement only — on-chain program cannot encode "advancer".
+    const skipOnchain =
+      knockout &&
+      homeScore === awayScore &&
+      (ctx.advancingSide === "home" || ctx.advancingSide === "away");
+    if (!skipOnchain) {
+      signature = (await settleMarketOnchain(market, onchainHome, onchainAway)).signature;
+    }
   }
   return settleMarketOffchain(marketId, homeScore, awayScore, signature, ctx);
 }
