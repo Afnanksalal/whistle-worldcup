@@ -50,7 +50,17 @@ export default function SquadsPage() {
 
   const create = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!owner || name.trim().length < 2) return;
+    if (name.trim().length < 2) {
+      setNotice({ tone: "error", text: "Choose a squad name with at least 2 characters." });
+      return;
+    }
+    if (!owner || !ready) {
+      setNotice({
+        tone: "error",
+        text: "Connect a wallet above, then approve the short sign request to create a squad.",
+      });
+      return;
+    }
     setNotice(null);
     try {
       const headers = await withWalletAuth();
@@ -72,7 +82,17 @@ export default function SquadsPage() {
 
   const join = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!owner || code.trim().length < 3) return;
+    if (code.trim().length < 3) {
+      setNotice({ tone: "error", text: "Enter the invite code from your squad organiser." });
+      return;
+    }
+    if (!owner || !ready) {
+      setNotice({
+        tone: "error",
+        text: "Connect a wallet above, then approve the short sign request to join.",
+      });
+      return;
+    }
     setNotice(null);
     try {
       const headers = await withWalletAuth();
