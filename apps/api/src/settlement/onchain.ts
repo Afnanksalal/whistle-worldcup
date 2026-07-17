@@ -95,7 +95,7 @@ export function deriveMarketPDA(
   line?: number,
   squadId?: string
 ): PublicKey {
-  const typeU8 = marketType === "match_result" ? 0 : 1;
+  const typeU8 = marketType === "match_result" ? 0 : marketType === "total_corners" ? 2 : 1;
   const lineValue = line === undefined ? 0 : Math.round(line * 100);
   const lineBuffer = Buffer.alloc(4);
   lineBuffer.writeUInt32LE(lineValue);
@@ -258,7 +258,9 @@ export function buildCreateMarketData(
   if (fixture.length > 64) throw new Error("fixture id exceeds 64 bytes");
   const fixtureLength = Buffer.alloc(4);
   fixtureLength.writeUInt32LE(fixture.length);
-  const marketType = Buffer.from([market.marketType === "match_result" ? 0 : 1]);
+  const marketType = Buffer.from([
+    market.marketType === "match_result" ? 0 : market.marketType === "total_corners" ? 2 : 1,
+  ]);
   const line = Buffer.alloc(4);
   line.writeUInt32LE(market.line === undefined ? 0 : Math.round(market.line * 100));
   const kickoff = Buffer.alloc(8);
@@ -390,6 +392,8 @@ export async function settleMarketOnchain(
     data: Buffer.concat([
       anchorDiscriminator("global", "settle"),
       Buffer.from([homeScore, awayScore, 1]),
+      // Borsh Vec<u8> length prefix — empty proof_ix_data (CPI optional)
+      Buffer.alloc(4),
     ]),
   });
   const signature = await sendAndConfirmTransaction(

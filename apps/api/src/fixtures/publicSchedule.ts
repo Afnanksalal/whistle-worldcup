@@ -213,5 +213,5 @@ export async function fetchPublicFixtures(): Promise<Fixture[]> {
   if (!fixtures.length) {
     throw new Error("TheSportsDB returned no fixtures");
   }
-  return fixtures.slice(0, 80);
+  return fixtures;
 }

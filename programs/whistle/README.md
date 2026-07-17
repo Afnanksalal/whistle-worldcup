@@ -1,25 +1,26 @@
 # Whistle Anchor program
 
-Parimutuel World Cup markets with USDC escrow PDAs.
+USDC parimutuel escrow for Whistle markets on Solana (devnet/mainnet).
 
 ## Instructions
 
-| Ix | Purpose |
-|----|---------|
-| `initialize` | Config PDA + USDC mint |
-| `create_market` | Market PDA + token vault |
-| `deposit` | Stake USDC into an outcome; upsert position PDA |
-| `settle` | Authority settles with final scores (keeper attaches TxLINE validation accounts for CPI when available) |
-| `claim` | Winners withdraw pro-rata pool share |
-| `void_market` | Refund path for abandoned matches |
+| Instruction | Role |
+|-------------|------|
+| `initialize` | Create config PDA (authority, USDC mint, fee bps) |
+| `create_market` | Open market PDA + vault (`market_type`: 0=1X2, 1=goals, 2=corners) |
+| `deposit` | Stake USDC into an outcome before kickoff |
+| `settle` | Authority settles with scores; optional CPI into TxLINE `validate_stat_v2` when `proof_ix_data` + remaining accounts (`txoracle`, `daily_scores_roots`) are provided |
+| `claim` | Winner (or refund on void) withdraws USDC minus fee |
+| `void_market` | Authority voids for refunds |
+
+## TxLINE verification
+
+- Off-chain keeper fetches `/api/scores/stat-validation-v2`, checks the `daily_scores_roots` PDA on-chain, and persists a settlement receipt for the UI.
+- On-chain settle accepts pre-built `validate_stat_v2` instruction bytes for CPI when the keeper attaches remaining accounts.
 
 ## Build
 
-Requires Solana CLI + Anchor 0.30.x:
-
 ```bash
-anchor build
-anchor deploy --provider.cluster devnet
+cargo check -p whistle
+anchor build   # when Anchor toolchain is available
 ```
-
-Program id placeholder in `declare_id!` / `Anchor.toml` must be updated after first `anchor keys list`.

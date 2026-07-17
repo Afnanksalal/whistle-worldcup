@@ -18,20 +18,42 @@ import { InsightsPanel } from "../../../components/InsightsPanel";
 import { TeamCrest } from "../../../components/TeamCrest";
 import { FootballLoader } from "../../../components/FootballLoader";
 import { ForecastPanel } from "../../../components/ForecastPanel";
+import { SettlementReceiptCard } from "../../../components/SettlementReceiptCard";
 import type { MatchDetail } from "../../../lib/match-detail";
 import { useSolanaTransactions } from "../../../lib/solana";
 
 const OUTCOME_LABELS: Record<string, string> = {
-  home: "Home win",
+  home: "Home",
   draw: "Draw",
-  away: "Away win",
+  away: "Away",
   over: "Over",
   under: "Under",
+  none: "No goal",
 };
+
+function marketTabLabel(type: string, line?: number) {
+  if (type === "match_result") return "1X2";
+  if (type === "total_goals") return `Goals ${line ?? 2.5}`;
+  if (type === "total_corners") return `Corners ${line ?? 9.5}`;
+  if (type === "first_scorer") return "First scorer";
+  if (type === "tournament_winner") return "Winner";
+  return type;
+}
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
-function outcomeName(outcome: string, fixture: Fixture) {
+function outcomeName(outcome: string, fixture: Fixture, marketType?: string) {
+  if (marketType === "first_scorer") {
+    if (outcome === "home") return `${fixture.home.name} first`;
+    if (outcome === "away") return `${fixture.away.name} first`;
+    if (outcome === "none") return "No goal";
+  }
+  if (marketType === "tournament_winner") {
+    return outcome
+      .split("-")
+      .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+      .join(" ");
+  }
   if (outcome === "home") return fixture.home.name;
   if (outcome === "away") return fixture.away.name;
   return OUTCOME_LABELS[outcome] || outcome;
@@ -111,6 +133,28 @@ export default function MatchPageInner({
     return () => clearInterval(poll);
   }, [data?.fixture.status, load]);
 
+  useEffect(() => {
+    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
+    const socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
+    socket.onmessage = (event) => {
+      try {
+        const message = JSON.parse(String(event.data)) as { event?: string };
+        if (
+          message.event === "score" ||
+          message.event === "odds" ||
+          message.event === "settled" ||
+          message.event === "receipt" ||
+          message.event === "fixtures"
+        ) {
+          void load();
+        }
+      } catch {
+        // ignore malformed fanout
+      }
+    };
+    return () => socket.close();
+  }, [load]);
+
   const market = useMemo(
     () => data?.markets.find((item) => item.id === selectedMarket) || data?.markets[0],
     [data, selectedMarket]
@@ -121,7 +165,10 @@ export default function MatchPageInner({
   const chartLabels = useMemo(() => {
     if (!data || !market) return {};
     return Object.fromEntries(
-      Object.keys(market.outcomes).map((key) => [key, outcomeName(key, data.fixture)])
+      Object.keys(market.outcomes).map((key) => [
+        key,
+        outcomeName(key, data.fixture, market.marketType),
+      ])
     );
   }, [data, market]);
 
@@ -179,7 +226,7 @@ export default function MatchPageInner({
         tone: "success",
         text: txSignature
           ? `${amount} ${stakeLabel} transaction confirmed: ${txSignature.slice(0, 8)}...`
-          : `${amount} ${stakeLabel} confirmed on ${outcomeName(selectedOutcome, data!.fixture)}.`,
+          : `${amount} ${stakeLabel} confirmed on ${outcomeName(selectedOutcome, data!.fixture, market.marketType)}.`,
       });
       await load();
     } catch (cause) {
@@ -271,7 +318,9 @@ export default function MatchPageInner({
           </div>
           <div
             key={hasScore ? `${homeScore}-${awayScore}` : "pending"}
-            className={`match-score${hasScore ? " has-score" : ""}`}
+            className={`match-score${hasScore ? " has-score" : ""}${
+              fixture.status === "live" && hasScore ? " is-pulsing" : ""
+            }`}
             aria-label={hasScore
               ? `${fixture.home.name} ${homeScore}, ${fixture.away.name} ${awayScore}`
               : `${fixture.home.name} versus ${fixture.away.name}`}
@@ -307,6 +356,36 @@ export default function MatchPageInner({
 
       <div className="match-layout">
         <div className="match-analysis">
+          {data.receipt && <SettlementReceiptCard receipt={data.receipt} />}
+
+          {(fixture.status === "live" || (live?.events && live.events.length > 0)) && (
+            <section className="match-event-tape" aria-label="Match events">
+              <div>
+                <p className="section-kicker">Live tape</p>
+                <h2>Match events</h2>
+                <p>Goals, cards, and corners from the live feed as they land.</p>
+              </div>
+              {live?.events?.length ? (
+                <ol className="event-tape-list">
+                  {[...live.events].reverse().map((event, index) => (
+                    <li key={`${event.type}-${event.minute}-${event.player}-${index}`}>
+                      <span className="mono">{event.minute != null ? `${event.minute}'` : "—"}</span>
+                      <strong>{event.type.replace(/_/g, " ")}</strong>
+                      <span>
+                        {[event.team, event.player, event.detail].filter(Boolean).join(" · ")}
+                      </span>
+                    </li>
+                  ))}
+                </ol>
+              ) : (
+                <div className="reference-empty">
+                  <strong>Waiting for the next event</strong>
+                  <span>The tape fills as TxLINE score actions arrive.</span>
+                </div>
+              )}
+            </section>
+          )}
+
           <ForecastPanel forecast={data.forecast} fixture={fixture} />
 
           <PredictionChart history={history} labels={chartLabels} />
@@ -316,6 +395,7 @@ export default function MatchPageInner({
               stats={data.stats || null}
               homeName={fixture.home.shortName || fixture.home.name}
               awayName={fixture.away.shortName || fixture.away.name}
+              liveEvents={live?.events}
             />
             <InsightsPanel insights={data.insights || []} now={now} />
           </div>
@@ -368,7 +448,7 @@ export default function MatchPageInner({
                       setNotice(null);
                     }}
                   >
-                    {item.marketType === "match_result" ? "Match result" : `Goals ${item.line}`}
+                    {marketTabLabel(item.marketType, item.line)}
                   </button>
                 ))}
               </div>
@@ -393,7 +473,9 @@ export default function MatchPageInner({
                           }}
                         >
                           <span>
-                            <strong>{outcomeName(outcome, fixture)}</strong>
+                            <strong>
+                              {outcomeName(outcome, fixture, market.marketType)}
+                            </strong>
                             <small>
                               {outcomePool
                                 ? `${number.format(outcomePool)} ${stakeLabel} backing`

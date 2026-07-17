@@ -153,7 +153,7 @@ export function FixtureBoard({
   const featuredShares = featuredResult ? impliedShares(featuredResult.outcomes) : {};
   const featuredPool = featuredResult?.totalPool || 0;
   const hasFeaturedLiquidity = featuredPool > 0;
-  const sourceIsLive = meta.txlineConfigured;
+  const sourceIsLive = meta.fixtureSource === "txline" || meta.txlineConfigured;
 
   return (
     <>

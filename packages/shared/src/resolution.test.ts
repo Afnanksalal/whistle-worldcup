@@ -7,8 +7,11 @@ import {
   marketIdentitySeed,
   outcomeToU8,
   payoutForPosition,
+  resolveCorners,
+  resolveFirstScorer,
   resolveMatchResult,
   resolveTotals,
+  teamOutcomeSlug,
 } from "./index";
 
 describe("resolveMatchResult", () => {
@@ -25,6 +28,28 @@ describe("resolveTotals", () => {
     assert.equal(resolveTotals(2, 1, 2.5), "over");
     assert.equal(resolveTotals(1, 1, 2), "under");
     assert.equal(resolveTotals(2, 1, 2), "over");
+  });
+});
+
+describe("resolveFirstScorer", () => {
+  it("uses event tape then score fallback", () => {
+    assert.equal(resolveFirstScorer(0, 0), "none");
+    assert.equal(resolveFirstScorer(2, 1, "away"), "away");
+    assert.equal(resolveFirstScorer(1, 0), "home");
+  });
+});
+
+describe("resolveCorners", () => {
+  it("compares total corners to the line", () => {
+    assert.equal(resolveCorners(4, 5, 9.5), "under");
+    assert.equal(resolveCorners(6, 5, 9.5), "over");
+  });
+});
+
+describe("teamOutcomeSlug", () => {
+  it("normalizes team names", () => {
+    assert.equal(teamOutcomeSlug("Côte d'Ivoire"), "c-te-d-ivoire");
+    assert.equal(teamOutcomeSlug("  France  "), "france");
   });
 });
 

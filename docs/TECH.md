@@ -54,9 +54,15 @@ Browser → Next.js (VPS) → Caddy → Whistle API
 | `GET /api/fixtures` (+ snapshot fallbacks) | Schedule |
 | `GET /api/scores` / snapshot | Score bootstrap |
 | `GET /api/scores/historical?fixtureId=` | Final records for settle |
-| `GET /api/scores/stat-validation-v2` | On-chain settle payload |
-| `GET /api/scores/stream` (SSE) | Live scores |
+| `GET /api/scores/stat-validation-v2` | Merkle proof payload for settle + receipt |
+| `GET /api/scores/stream` (SSE) | Live scores + soccer event actions |
 | `GET /api/odds/stream` (SSE) | Reference odds |
+| `GET /api/fixtures/:id/receipt` | Persisted settlement receipt (seq, Merkle summary, PDA) |
+| `GET /api/markets/board` | Global volume / implied-probability board |
+
+Market types auto-created per stakeable fixture: `match_result`, `total_goals` (2.5), `first_scorer`, `total_corners` (9.5), plus a global `tournament_winner` market.
+
+Settlement: keeper requires TxLINE historical final + validation payload, checks `daily_scores_roots` PDA presence on Solana, stores a `SettlementReceipt`, then settles ledger and/or USDC markets. Anchor `settle` accepts optional CPI instruction bytes into TxLINE `validate_stat_v2`.
 
 Networks: **devnet** `https://txline-dev.txodds.com` or **mainnet** free tiers.
 

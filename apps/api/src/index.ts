@@ -21,6 +21,7 @@ import { configureKeeper, startKeeperLoop } from "./settlement/keeper";
 import {
   enforceMarketCutoffs,
   ensureMarket,
+  ensureTournamentWinnerMarket,
   reconcileMarkets,
 } from "./markets/service";
 import { isFixtureStakeable } from "./markets/lifecycle";
@@ -74,7 +75,8 @@ async function main() {
     configureKeeper(
       verifiedTxlineConfig(),
       cfg.keepSettleEnabled,
-      cfg.onchainSettlementEnabled
+      cfg.onchainSettlementEnabled,
+      cfg.network === "mainnet" ? "mainnet" : "devnet"
     );
   const ensureScheduledMarkets = () => {
     for (const fixture of Object.values(getState().fixtures)) {
@@ -87,7 +89,16 @@ async function main() {
         { fixtureId: fixture.id, marketType: "total_goals", line: 2.5 },
         { durable: false }
       );
+      ensureMarket(
+        { fixtureId: fixture.id, marketType: "first_scorer" },
+        { durable: false }
+      );
+      ensureMarket(
+        { fixtureId: fixture.id, marketType: "total_corners", line: 9.5 },
+        { durable: false }
+      );
     }
+    ensureTournamentWinnerMarket({ durable: false });
   };
   const reconcileLifecycle = () => {
     const summary = reconcileMarkets({

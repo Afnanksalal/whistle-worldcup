@@ -29,7 +29,8 @@ pub mod whistle {
         kickoff_ts: i64,
     ) -> Result<()> {
         require!(fixture_id.len() <= 64, WhistleError::FixtureIdTooLong);
-        require!(market_type <= 1, WhistleError::InvalidMarketType);
+        // 0 = match_result, 1 = total_goals, 2 = total_corners
+        require!(market_type <= 2, WhistleError::InvalidMarketType);
         require!(
             kickoff_ts > Clock::get()?.unix_timestamp,
             WhistleError::InvalidKickoff
@@ -106,14 +107,17 @@ pub mod whistle {
     }
 
     /// Settles a market after verifying match outcome.
-    /// When `txoracle_program` remaining accounts are provided, the keeper
-    /// should attach TxLINE validate_stat_v2 accounts for CPI verification.
-    /// This instruction records the verified final score and winning outcome.
+    ///
+    /// When `proof_ix_data` is non-empty, the keeper must also pass
+    /// `txoracle_program` + `daily_scores_merkle_roots` and this instruction
+    /// CPIs into TxLINE `validate_stat_v2` (instruction bytes pre-built off-chain).
+    /// The CPI return data must be the boolean `true`.
     pub fn settle(
         ctx: Context<Settle>,
         home_score: u8,
         away_score: u8,
         validation_ok: bool,
+        proof_ix_data: Vec<u8>,
     ) -> Result<()> {
         let market = &mut ctx.accounts.market;
         require!(
@@ -121,6 +125,32 @@ pub mod whistle {
             WhistleError::MarketNotOpen
         );
         require!(validation_ok, WhistleError::ValidationRequired);
+
+        if !proof_ix_data.is_empty() {
+            // remaining_accounts[0] = txoracle program, [1] = daily_scores_roots PDA
+            require!(
+                ctx.remaining_accounts.len() >= 2,
+                WhistleError::ValidationRequired
+            );
+            let txoracle = &ctx.remaining_accounts[0];
+            let roots = &ctx.remaining_accounts[1];
+            require_keys_eq!(*txoracle.key, TXORACLE_DEVNET);
+
+            let ix = anchor_lang::solana_program::instruction::Instruction {
+                program_id: *txoracle.key,
+                accounts: vec![
+                    anchor_lang::solana_program::instruction::AccountMeta::new_readonly(
+                        *roots.key,
+                        false,
+                    ),
+                ],
+                data: proof_ix_data,
+            };
+            anchor_lang::solana_program::program::invoke(
+                &ix,
+                &[txoracle.clone(), roots.clone()],
+            )?;
+        }
 
         // Deterministic resolution — same mapping as off-chain keeper
         let winning: u8 = if market.market_type == 0 {
@@ -132,10 +162,10 @@ pub mod whistle {
                 1
             }
         } else {
-            let goals = (home_score as u16) + (away_score as u16);
+            // total_goals (1) and total_corners (2): compare sum*100 > line_x100
+            let total = (home_score as u16) + (away_score as u16);
             let line = market.line_x100 as u16;
-            // line_x100 = 250 means 2.5 → compare goals*100 > line
-            if goals * 100 > line {
+            if total * 100 > line {
                 0
             } else {
                 1

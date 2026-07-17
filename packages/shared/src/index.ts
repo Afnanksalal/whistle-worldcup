@@ -1,10 +1,21 @@
 import { sha256 } from "@noble/hashes/sha256";
 
-export type MarketType = "match_result" | "total_goals";
+export type MarketType =
+  | "match_result"
+  | "total_goals"
+  | "first_scorer"
+  | "total_corners"
+  | "tournament_winner";
 
 export type MatchResultOutcome = "home" | "draw" | "away";
 export type TotalsOutcome = "over" | "under";
-export type MarketOutcome = MatchResultOutcome | TotalsOutcome;
+export type FirstScorerOutcome = "home" | "away" | "none";
+/** Dynamic team-slug outcomes for tournament_winner, plus standard outcomes. */
+export type MarketOutcome =
+  | MatchResultOutcome
+  | TotalsOutcome
+  | FirstScorerOutcome
+  | string;
 
 export type MarketStatus = "open" | "locked" | "settled" | "void";
 
@@ -228,6 +239,34 @@ export interface MatchForecast {
   freshness: ForecastFreshness;
 }
 
+export interface SettlementReceipt {
+  fixtureId: string;
+  marketIds: string[];
+  seq: number | string;
+  homeScore: number;
+  awayScore: number;
+  validatedAt: number;
+  validationOk: boolean;
+  onchainProofVerified: boolean;
+  mode: "ledger" | "onchain";
+  settleTxSig?: string;
+  merkle: {
+    eventStatRoot?: string;
+    fixtureId?: string | number;
+    minTimestamp?: number;
+    maxTimestamp?: number;
+    epochDay?: number;
+    dailyScoresPda?: string;
+    mainTreeProofNodes?: number;
+    subTreeProofNodes?: number;
+    statsCount?: number;
+  };
+  /** Short human summary for UI. */
+  proofSummary?: string;
+  /** Full TxLINE validation payload for expandable receipt detail. */
+  rawValidation?: unknown;
+}
+
 export interface OddsQuote {
   fixtureId: string;
   market: string;
@@ -336,6 +375,36 @@ export function resolveTotals(
   return goals > line ? "over" : "under";
 }
 
+/** Which side scored first. `firstTeam` is home|away from the first goal event; omit for 0-0. */
+export function resolveFirstScorer(
+  homeScore: number,
+  awayScore: number,
+  firstTeam?: "home" | "away" | null
+): FirstScorerOutcome {
+  if (homeScore === 0 && awayScore === 0) return "none";
+  if (firstTeam === "home" || firstTeam === "away") return firstTeam;
+  // Fallback when event tape missing: cannot know first scorer from final score alone.
+  if (homeScore > 0 && awayScore === 0) return "home";
+  if (awayScore > 0 && homeScore === 0) return "away";
+  return "none";
+}
+
+export function resolveCorners(
+  homeCorners: number,
+  awayCorners: number,
+  line: number
+): TotalsOutcome {
+  return homeCorners + awayCorners > line ? "over" : "under";
+}
+
+export function teamOutcomeSlug(name: string): string {
+  return name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "unknown";
+}
+
 export function isFinalScoreRecord(record: {
   action?: string;
   statusId?: number;
@@ -390,9 +459,13 @@ export function outcomeToU8(marketType: MarketType, outcome: MarketOutcome): num
     if (outcome === "home") return 0;
     if (outcome === "draw") return 1;
     if (outcome === "away") return 2;
-  } else {
+  } else if (marketType === "total_goals" || marketType === "total_corners") {
     if (outcome === "over") return 0;
     if (outcome === "under") return 1;
+  } else if (marketType === "first_scorer") {
+    if (outcome === "home") return 0;
+    if (outcome === "away") return 1;
+    if (outcome === "none") return 2;
   }
   throw new Error(`Invalid outcome ${outcome} for market type ${marketType}`);
 }
@@ -402,9 +475,20 @@ export function u8ToOutcome(marketType: MarketType, val: number): MarketOutcome 
     if (val === 0) return "home";
     if (val === 1) return "draw";
     if (val === 2) return "away";
-  } else {
+  } else if (marketType === "total_goals" || marketType === "total_corners") {
     if (val === 0) return "over";
     if (val === 1) return "under";
+  } else if (marketType === "first_scorer") {
+    if (val === 0) return "home";
+    if (val === 1) return "away";
+    if (val === 2) return "none";
   }
   throw new Error(`Invalid u8 outcome value ${val} for market type ${marketType}`);
+}
+
+export function onchainMarketTypeU8(marketType: MarketType): number | null {
+  if (marketType === "match_result") return 0;
+  if (marketType === "total_goals") return 1;
+  if (marketType === "total_corners") return 2;
+  return null;
 }
