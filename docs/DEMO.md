@@ -3,7 +3,7 @@
 Record against the **live playground rail** (`/api/health`). Expect
 `fixtureSource: txline`, ~106 World Cup fixtures (~104 in Results), and — when
 the on-chain overlay is up — `settlementRail: onchain`, `stakeAsset: USDC`,
-`whistleProgramId: 3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX`.
+`whistleProgramId: C2vCTGZDJYvcd8jdgvFF57FnfdDsUqQy7qogjP2SmDcU`.
 
 ## 1. Problem (30s)
 
@@ -15,9 +15,9 @@ World Cup fans want to stake with friends and get paid at full-time. Sportsbooks
 - **Results** — open the Results filter and scroll the ~104 finished WC matches (lookback board)
 - **Markets board** (`/markets`) — volume, implied probs, reference odds
 - **Tournament** (`/groups`) + **News** (`/news`)
-- **Open a match** — stake on remaining knockouts (1X2 / goals / first scorer / corners); show pool % + forecast vs crowd
+- **Open a knockout** — show **To advance** (no Draw); forecast redistributes regulation-draw mass; stake goals / first scorer / corners separately
 - **Live tape** — score pulse + TxLINE event feed during a live match (or show finished match events)
-- **Connect wallet** — sign challenge → stake play units (or USDC if on-chain is live)
+- **Connect wallet** — Whistle Demo (playground) or Phantom → **Get demo USDC** (signed) → stake USDC on-chain
 - **Positions** (`/positions`) — active / claimable
 - **Settlement receipt** — on a finished match show seq, Merkle summary, PDA, proof detail
 - **Squads** — create / join invite

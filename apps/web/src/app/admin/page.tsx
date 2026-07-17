@@ -87,12 +87,18 @@ export default function AdminPage() {
       </p>
 
       <div className="panel" style={{ padding: "1.1rem", margin: "1.25rem 0", display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <label className="sr-only" htmlFor="admin-api-key">
+          Admin API key
+        </label>
         <input
+          id="admin-api-key"
           className="field mono"
           type="password"
           value={key}
           onChange={(e) => setKey(e.target.value)}
           placeholder="ADMIN_API_KEY"
+          autoComplete="current-password"
+          aria-label="Admin API key"
           style={{ flex: 1, minWidth: 220, marginTop: 0 }}
         />
         <button className="btn btn-primary" onClick={persist}>

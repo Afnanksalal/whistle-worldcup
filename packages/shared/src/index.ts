@@ -309,7 +309,8 @@ export interface Position {
 export interface Squad {
   id: string;
   name: string;
-  inviteCode: string;
+  /** Present for creators/join responses and authenticated member reads; omitted on public GET. */
+  inviteCode?: string;
   createdAt: number;
   members: string[];
 }

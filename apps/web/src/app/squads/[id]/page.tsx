@@ -35,7 +35,17 @@ export default function SquadDetailPage() {
       fixtures: Fixture[];
       leaderboard: Leader[];
     }>(`/squads/${id}`, { signal });
-    setSquad(response.squad);
+    let cached: string | undefined;
+    try {
+      cached = sessionStorage.getItem(`whistle:squad-invite:${id}`) || undefined;
+    } catch {
+      cached = undefined;
+    }
+    setSquad((prev) => ({
+      ...response.squad,
+      // Keep invite from create/join cache or a prior reveal — public GET omits it.
+      inviteCode: response.squad.inviteCode || prev?.inviteCode || cached,
+    }));
     setMarkets(response.markets);
     setFixtures(response.fixtures || []);
     setLeaderboard(response.leaderboard);
@@ -53,6 +63,25 @@ export default function SquadDetailPage() {
     });
     return () => controller.abort();
   }, [load]);
+
+  const revealInvite = useCallback(async () => {
+    if (!owner || !ready) return;
+    try {
+      const headers = await withWalletAuth({ required: true });
+      const response = await api<{ inviteCode: string }>(`/squads/${id}/invite`, { headers });
+      try {
+        sessionStorage.setItem(`whistle:squad-invite:${id}`, response.inviteCode);
+      } catch {
+        /* ignore quota / private mode */
+      }
+      setSquad((prev) => (prev ? { ...prev, inviteCode: response.inviteCode } : prev));
+    } catch (cause) {
+      setNotice({
+        tone: "error",
+        text: cause instanceof Error ? cause.message : "Invite code could not be revealed.",
+      });
+    }
+  }, [id, owner, ready, withWalletAuth]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -141,11 +170,27 @@ export default function SquadDetailPage() {
               {owner ? <span>Signed in as <strong className="mono">{shortAddr(owner)}</strong></span> : <span>Connect to take part</span>}
             </div>
           </div>
-          <aside className="squad-invite-card" aria-label={`Invite code ${squad.inviteCode}`}>
-            <span>Invite code</span>
-            <strong className="mono">{squad.inviteCode}</strong>
-            <small>Share privately with your group</small>
-          </aside>
+          {squad.inviteCode ? (
+            <aside className="squad-invite-card" aria-label={`Invite code ${squad.inviteCode}`}>
+              <span>Invite code</span>
+              <strong className="mono">{squad.inviteCode}</strong>
+              <small>Share privately with your group</small>
+            </aside>
+          ) : isMember ? (
+            <aside className="squad-invite-card" aria-label="Reveal invite code">
+              <span>Invite code</span>
+              <button type="button" className="btn btn-secondary" onClick={() => void revealInvite()}>
+                Reveal invite
+              </button>
+              <small>Sign once to show the code for your group</small>
+            </aside>
+          ) : (
+            <aside className="squad-invite-card" aria-label="Members only invite">
+              <span>Invite code</span>
+              <strong>Members only</strong>
+              <small>Join with a code from your organiser</small>
+            </aside>
+          )}
         </header>
 
         <section className="squad-pulse" aria-label="Squad summary">

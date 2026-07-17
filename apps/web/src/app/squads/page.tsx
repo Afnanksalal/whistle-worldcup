@@ -69,6 +69,16 @@ export default function SquadsPage() {
         headers,
         body: JSON.stringify({ name: name.trim(), creator: owner }),
       });
+      if (response.squad.inviteCode) {
+        try {
+          sessionStorage.setItem(
+            `whistle:squad-invite:${response.squad.id}`,
+            response.squad.inviteCode
+          );
+        } catch {
+          /* ignore */
+        }
+      }
       setNotice({ tone: "success", text: `${response.squad.name} is ready.` });
       setName("");
       router.push(`/squads/${response.squad.id}`);
@@ -101,6 +111,16 @@ export default function SquadsPage() {
         headers,
         body: JSON.stringify({ inviteCode: code.trim(), member: owner }),
       });
+      if (response.squad.inviteCode) {
+        try {
+          sessionStorage.setItem(
+            `whistle:squad-invite:${response.squad.id}`,
+            response.squad.inviteCode
+          );
+        } catch {
+          /* ignore */
+        }
+      }
       setNotice({ tone: "success", text: `You joined ${response.squad.name}.` });
       setCode("");
       router.push(`/squads/${response.squad.id}`);

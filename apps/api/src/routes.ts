@@ -35,7 +35,14 @@ import { fundDemoWallet } from "./settlement/demoFund";
 import { isFixtureStakeable } from "./markets/lifecycle";
 import type { AppConfig } from "./config";
 import { publicMeta } from "./config";
-import { issueChallenge, requireAdmin, requireWalletOwner } from "./auth";
+import {
+  issueChallenge,
+  isValidSolanaAddress,
+  requireAdmin,
+  requireWalletAuthHeaders,
+  requireWalletOwner,
+  verifyRequestWalletAuth,
+} from "./auth";
 import { buildGroupTables, listRounds } from "./groups";
 import { getWorldCupNews } from "./news";
 import { bumpMetric, getMetrics, metricsPrometheus } from "./observability";
@@ -77,11 +84,13 @@ export function createRouter(cfg: AppConfig) {
   const router = Router();
   const admin = requireAdmin(cfg);
   const walletOwner = requireWalletOwner(cfg);
+  const walletAuth = requireWalletAuthHeaders(cfg);
   const totalLine = z
     .number()
     .positive()
     .max(20)
     .refine((line) => Number.isInteger(line * 2), "line must be a half-goal value");
+  const demoFundRecent = new Map<string, number>();
 
   router.get("/health", (_req, res) => {
     const state = getState();
@@ -119,6 +128,9 @@ export function createRouter(cfg: AppConfig) {
     const schema = z.object({ wallet: z.string().min(32).max(64) });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json(parsed.error.flatten());
+    if (!isValidSolanaAddress(parsed.data.wallet)) {
+      return res.status(400).json({ error: "wallet must be a Solana address" });
+    }
     res.json(issueChallenge(parsed.data.wallet));
   });
 
@@ -128,17 +140,26 @@ export function createRouter(cfg: AppConfig) {
     }
     const schema = z.object({
       wallet: z.string().min(32).max(64),
-      usdcAmount: z.number().positive().max(5_000).optional(),
+      usdcAmount: z.number().positive().max(500).optional(),
     });
     const parsed = schema.safeParse(req.body);
     if (!parsed.success) return res.status(400).json(parsed.error.flatten());
+    if (!isValidSolanaAddress(parsed.data.wallet)) {
+      return res.status(400).json({ error: "wallet must be a Solana address" });
+    }
+    const auth = verifyRequestWalletAuth(req, parsed.data.wallet);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    const last = demoFundRecent.get(parsed.data.wallet) || 0;
+    if (Date.now() - last < 60_000) {
+      return res.status(429).json({ error: "demo funding rate limited; try again shortly" });
+    }
     try {
       const funded = await fundDemoWallet(parsed.data);
+      demoFundRecent.set(parsed.data.wallet, Date.now());
       res.json(funded);
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      req.log?.error({ err: error, detail }, "demo wallet funding failed");
-      res.status(503).json({ error: "demo wallet funding failed", detail });
+      req.log?.error({ err: error }, "demo wallet funding failed");
+      res.status(503).json({ error: "demo wallet funding failed" });
     }
   });
 
@@ -413,7 +434,7 @@ export function createRouter(cfg: AppConfig) {
     }
   });
 
-  router.post("/markets/:id/prepare", async (req, res) => {
+  router.post("/markets/:id/prepare", walletAuth, async (req, res) => {
     if (!cfg.onchainSettlementEnabled || !cfg.whistleProgramId || !cfg.usdcMint) {
       return res.status(409).json({ error: "on-chain staking is not enabled" });
     }
@@ -441,11 +462,9 @@ export function createRouter(cfg: AppConfig) {
         usdcMint: cfg.usdcMint,
       });
     } catch (error) {
-      const detail = error instanceof Error ? error.message : String(error);
-      req.log?.error({ err: error, marketId: market.id, detail }, "on-chain market preparation failed");
+      req.log?.error({ err: error, marketId: market.id }, "on-chain market preparation failed");
       res.status(503).json({
         error: "on-chain market could not be prepared",
-        detail,
       });
     }
   });
@@ -501,7 +520,16 @@ export function createRouter(cfg: AppConfig) {
       bumpMetric("deposits");
       res.json(result);
     } catch (e) {
-      res.status(400).json({ error: String(e) });
+      req.log?.warn({ err: e, marketId: req.params.id }, "deposit rejected");
+      const message = e instanceof Error ? e.message : "deposit failed";
+      // Surface known domain errors; avoid leaking RPC / stack internals.
+      const safe =
+        /market|outcome|closed|stake|amount|signature|verify|fixture|draw|knockout|position|owner/i.test(
+          message
+        )
+          ? message
+          : "deposit failed";
+      res.status(400).json({ error: safe });
     }
   });
 
@@ -670,12 +698,26 @@ export function createRouter(cfg: AppConfig) {
     const fixtures = markets
       .map((m) => getState().fixtures[m.fixtureId])
       .filter(Boolean);
+    // Never expose invite codes on the public read path.
+    const { inviteCode: _inviteCode, ...publicSquad } = squad;
     res.json({
-      squad,
+      squad: publicSquad,
       markets,
       fixtures: fixtures.map(publicFixture),
       leaderboard: squadLeaderboard(squad.id),
     });
+  });
+
+  /** Members-only invite reveal (signed wallet must be in squad.members). */
+  router.get("/squads/:id/invite", (req, res) => {
+    const squad = getState().squads[req.params.id];
+    if (!squad) return res.status(404).json({ error: "not found" });
+    const auth = verifyRequestWalletAuth(req);
+    if (!auth.ok) return res.status(auth.status).json({ error: auth.error });
+    if (!squad.members.includes(auth.wallet)) {
+      return res.status(403).json({ error: "squad members only" });
+    }
+    res.json({ inviteCode: squad.inviteCode });
   });
 
   router.get("/squads", (_req, res) => {

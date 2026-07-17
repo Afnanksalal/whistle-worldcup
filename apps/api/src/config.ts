@@ -145,11 +145,19 @@ export function loadConfig(): AppConfig {
     onchainSettlementEnabled,
     platformFeeBps,
     logLevel: process.env.LOG_LEVEL || (isProd ? "info" : "debug"),
-    rateLimitPerMin: Number(process.env.RATE_LIMIT_PER_MIN || 120),
+    rateLimitPerMin: (() => {
+      const parsed = Number(process.env.RATE_LIMIT_PER_MIN || 120);
+      if (!Number.isFinite(parsed) || parsed < 10 || parsed > 10_000) {
+        throw new Error("RATE_LIMIT_PER_MIN must be a number between 10 and 10000");
+      }
+      return Math.floor(parsed);
+    })(),
+    // Devnet/playground faucet only — never enable on mainnet / mainnet-beta.
     demoWalletEnabled:
       truthy(process.env.ENABLE_DEMO_WALLET) &&
       onchainSettlementEnabled &&
-      network !== "mainnet",
+      network !== "mainnet" &&
+      network !== "mainnet-beta",
   };
 }
 

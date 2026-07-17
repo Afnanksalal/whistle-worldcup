@@ -3,6 +3,7 @@
 import { useWallet } from "@solana/wallet-adapter-react";
 import { useCallback, useState } from "react";
 import { api } from "../lib/api";
+import { useIdentity } from "../lib/identity";
 import { useRuntime } from "../lib/runtime";
 
 type FundResponse = {
@@ -13,6 +14,7 @@ type FundResponse = {
 export function DemoWalletFund() {
   const { meta } = useRuntime();
   const { publicKey, connected } = useWallet();
+  const { withWalletAuth, ready } = useIdentity();
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState<string | null>(null);
 
@@ -21,17 +23,24 @@ export function DemoWalletFund() {
     setBusy(true);
     setNote(null);
     try {
+      const headers = await withWalletAuth({ required: true });
       const result = await api<FundResponse>("/demo/fund", {
         method: "POST",
+        headers,
         body: JSON.stringify({ wallet: publicKey.toBase58(), usdcAmount: 500 }),
       });
       setNote(`${result.usdcBalance.toFixed(0)} USDC · ${result.solBalance.toFixed(3)} SOL`);
     } catch (error) {
-      setNote(error instanceof Error ? error.message : "Funding failed");
+      const message = error instanceof Error ? error.message : "Funding failed";
+      setNote(
+        /signed challenge|wallet identity/i.test(message)
+          ? "Sign the wallet challenge to receive demo funds."
+          : message
+      );
     } finally {
       setBusy(false);
     }
-  }, [publicKey]);
+  }, [publicKey, withWalletAuth]);
 
   if (!meta.demoWalletEnabled) return null;
 
@@ -40,7 +49,7 @@ export function DemoWalletFund() {
       <button
         type="button"
         className="btn btn-secondary demo-wallet-fund-btn"
-        disabled={!connected || busy}
+        disabled={!connected || !ready || busy}
         onClick={() => void fund()}
       >
         {busy ? "Funding…" : "Get demo USDC"}

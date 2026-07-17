@@ -693,31 +693,55 @@ export function buildDeterministicForecast(
 function crowdSnapshot(input: ForecastInput): CrowdPriceSnapshot {
   const market = input.publicMarket;
   const outcomes = market?.outcomes;
+  const hasHomeAway =
+    outcomes &&
+    Number.isFinite(outcomes.home) &&
+    outcomes.home >= 0 &&
+    Number.isFinite(outcomes.away) &&
+    outcomes.away >= 0;
+  const knockoutPool = hasHomeAway && !("draw" in (outcomes || {}));
   const funded =
     market &&
     market.marketType === "match_result" &&
     market.totalPool > 0 &&
     outcomes &&
-    ["home", "draw", "away"].every(
-      (outcome) => Number.isFinite(outcomes[outcome]) && outcomes[outcome] >= 0
-    ) &&
-    outcomes.home + outcomes.draw + outcomes.away > 0;
+    hasHomeAway &&
+    (knockoutPool
+      ? outcomes.home + outcomes.away > 0
+      : Number.isFinite(outcomes.draw) &&
+        outcomes.draw >= 0 &&
+        outcomes.home + outcomes.draw + outcomes.away > 0);
   const disclaimer =
     "Funded pool composition reflects participant positioning, not the model forecast or an objective probability.";
   if (!funded || !market || !outcomes) {
     return { available: false, label: "pool_implied", disclaimer };
   }
   const latest = input.marketHistory?.[input.marketHistory.length - 1];
+  const probs = knockoutPool
+    ? normalizeProbabilities({
+        home: outcomes.home,
+        draw: 0,
+        away: outcomes.away,
+      })
+    : normalizeProbabilities({
+        home: outcomes.home,
+        draw: outcomes.draw,
+        away: outcomes.away,
+      });
+  if (knockoutPool) {
+    const duo = probs.home + probs.away;
+    if (duo > 0) {
+      probs.home = probs.home / duo;
+      probs.away = probs.away / duo;
+      probs.draw = 0;
+    }
+  }
   return {
     available: true,
     label: "pool_implied",
     marketId: market.id,
     totalPoolUnits: market.totalPool,
-    probabilities: normalizeProbabilities({
-      home: outcomes.home,
-      draw: outcomes.draw,
-      away: outcomes.away,
-    }),
+    probabilities: probs,
     asOf: latest?.ts || market.createdAt,
     disclaimer,
   };

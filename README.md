@@ -13,8 +13,8 @@ Powered by [TxLINE](https://txline.txodds.com) sports data on Solana (with free 
 - **Markets board** — live schedule with pool sizes
 - **Group stage** — standings derived from finished fixtures (`/groups`)
 - **News** — keyless, World Cup-scoped BBC and Guardian RSS at `/news`
-- **Parimutuel pools** — 1X2 + O/U 2.5; pool composition sets price
-- **Match desk** — scores, stake UI, reference odds when TxLINE SSE is live
+- **Parimutuel pools** — group 1X2 / knockout to-advance + O/U; pool composition sets price
+- **Match desk** — scores, stake UI, step pool tape, reference odds when TxLINE SSE is live
 - **Squads** — private books, invite codes, leaderboards
 - **Positions & claims** — stake book + FT / void refunds
 - **Admin** — `/admin` ops console (lock / void / settle) behind `ADMIN_API_KEY`
@@ -72,7 +72,7 @@ mint addresses from `/api/meta`.
 
 Devnet program currently deployed for the playground:
 
-`WHISTLE_PROGRAM_ID=3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX`
+`WHISTLE_PROGRAM_ID=C2vCTGZDJYvcd8jdgvFF57FnfdDsUqQy7qogjP2SmDcU`
 
 For the full World Cup board (including ~104 finished matches), set
 `TXLINE_COMPETITION_IDS=72` and `TXLINE_FIXTURE_LOOKBACK_DAYS=50` (defaults in

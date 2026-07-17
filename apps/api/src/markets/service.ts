@@ -155,6 +155,14 @@ export function deposit(req: DepositRequest): { market: MarketPool; position: Po
     throw new Error("market closed at kickoff");
   }
   if (!(req.outcome in market.outcomes)) throw new Error("invalid outcome");
+  if (
+    market.marketType === "match_result" &&
+    req.outcome === "draw" &&
+    fixture &&
+    isKnockoutMatchResult(fixture)
+  ) {
+    throw new Error("knockout markets have no draw — pick a side to advance");
+  }
 
   if (req.txSignature) {
     const replay = Object.values(state.positions).find((candidate) =>
@@ -560,7 +568,7 @@ export function createSquad(name: string, creator: string): Squad {
 
 export function joinSquad(inviteCode: string, member: string): Squad {
   const squad = Object.values(getState().squads).find(
-    (s) => s.inviteCode.toLowerCase() === inviteCode.toLowerCase()
+    (s) => (s.inviteCode || "").toLowerCase() === inviteCode.toLowerCase()
   );
   if (!squad) throw new Error("squad not found");
   mutate((s) => {

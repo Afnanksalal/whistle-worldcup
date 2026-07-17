@@ -464,8 +464,8 @@ export function FixtureBoard({
                             {outcome === "draw"
                               ? "Draw"
                               : outcome === "home"
-                                ? "Home"
-                                : "Away"}
+                                ? fixture.home.shortName || fixture.home.name
+                                : fixture.away.shortName || fixture.away.name}
                           </small>
                           <strong>
                             {hasResultLiquidity

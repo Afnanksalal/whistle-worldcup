@@ -10,7 +10,7 @@ Whistle is a fan-facing World Cup prediction product: public and squad parimutue
 - **Parimutuel, not AMM** — stakes form outcome pools; implied odds = pool shares
 - **Live data board** — TxLINE primary; TheSportsDB free public schedule as fallback
 - **Keeper settlement** — only a canonical TxLINE final record with a sequence and non-empty validation payload may settle a market
-- **Squads** — invite-code private tables + PnL leaderboard
+- **Squads** — invite-code private tables + PnL leaderboard (invite codes omitted from public `GET /squads/:id`; members reveal via signed `GET /squads/:id/invite`)
 - **Admin API** — settle / void / lock behind `ADMIN_API_KEY`
 - **News** — parallel, timed World Cup-scoped BBC and Guardian RSS with relevance filtering, image extraction, and stale-cache recovery
 - **Match intelligence** — evidence-gated deterministic signals plus an optional cached LLM summary
@@ -46,12 +46,15 @@ Browser → Next.js (VPS) → Caddy → Whistle API
 | `PLATFORM_FEE_BPS` | On-chain fee, default 250 and hard-capped at 1000; must match the config PDA |
 | `TXLINE_COMPETITION_IDS` | Comma-separated competition ids for snapshot fetch; default `72` (World Cup). Use `*` for all free-tier competitions |
 | `TXLINE_FIXTURE_LOOKBACK_DAYS` | Days subtracted from today's UTC epoch day for `startEpochDay` (default `50`) so finished WC matches stay on the board |
+| `ENABLE_DEMO_WALLET` | Optional. When `true` on **non-mainnet** on-chain deploys, exposes a signed faucet (`POST /api/demo/fund`) and a browser demo wallet. **Never enable on mainnet.** |
+| `RATE_LIMIT_PER_MIN` | Global HTTP rate limit (10–10000); default `120` |
+| `REQUIRE_WALLET_AUTH` | Wallet signed challenges for prepare/deposit/claim; forced on in production |
 
 ### Devnet program (deployed)
 
 | Item | Value |
 |------|-------|
-| Program ID | `3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX` |
+| Program ID | `C2vCTGZDJYvcd8jdgvFF57FnfdDsUqQy7qogjP2SmDcU` |
 | USDC mint (devnet) | `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` |
 | Config PDA | Derived from `[b"whistle_config"]` (see `scripts/init-program.js` output) |
 | Authority key | Host file under `secrets/` (gitignored); mounted via `docker-compose.onchain.yml` |
@@ -74,7 +77,16 @@ Browser → Next.js (VPS) → Caddy → Whistle API
 
 Market types auto-created per stakeable fixture: `match_result`, `total_goals` (2.5), `first_scorer`, `total_corners` (9.5), plus a global `tournament_winner` market.
 
-Settlement: keeper requires TxLINE historical final + validation payload, checks `daily_scores_roots` PDA presence on Solana, stores a `SettlementReceipt`, then settles ledger and/or USDC markets. Anchor `settle` accepts optional CPI instruction bytes into TxLINE `validate_stat_v2`.
+### Group vs knockout match-result markets
+
+FIFA World Cup knockout ties cannot finish as draws (extra time / penalties decide the winner). Whistle therefore:
+
+- Keeps classic **1X2** (`home` / `draw` / `away`) for **group stage**
+- Uses **to-advance** (`home` / `away` only) from **Round of 32** onward
+
+TxLINE snapshots often omit round labels. The API infers stage from `FixtureGroupId` cohort size within a competition (large cohorts → group; 16/8/4/2/1 → R32/R16/QF/SF/Final). Transient verification failures **defer** settlement instead of voiding pools; cancelled/postponed fixtures still refund.
+
+Settlement: keeper requires TxLINE historical final + validation payload, checks `daily_scores_roots` PDA presence on Solana, stores a `SettlementReceipt`, then settles ledger and/or USDC markets. Corner markets wait for box-score stats; level knockouts wait for an advancing side. Anchor `settle` accepts optional CPI instruction bytes into TxLINE `validate_stat_v2`.
 
 Networks: **devnet** `https://txline-dev.txodds.com` or **mainnet** free tiers.
 

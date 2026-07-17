@@ -70,6 +70,43 @@ export function requireAdmin(cfg: AppConfig) {
   };
 }
 
+/** Verify signed challenge headers; optionally require wallet === expectedWallet. */
+export function verifyRequestWalletAuth(
+  req: Request,
+  expectedWallet?: string
+): { ok: true; wallet: string } | { ok: false; status: number; error: string } {
+  const wallet = header(req, "x-wallet") || expectedWallet || "";
+  if (!wallet || !isValidSolanaAddress(wallet)) {
+    return { ok: false, status: 401, error: "wallet identity required" };
+  }
+  if (expectedWallet && wallet !== expectedWallet) {
+    return { ok: false, status: 401, error: "wallet identity required" };
+  }
+  const nonce = header(req, "x-wallet-nonce");
+  const signature = header(req, "x-wallet-signature");
+  const expected = consumeChallenge(nonce);
+  if (!expected || !signature) {
+    return { ok: false, status: 401, error: "valid signed challenge required" };
+  }
+  // Challenge message is wallet-bound at issue time — reject nonce reuse across wallets.
+  if (!expected.includes(`Wallet: ${wallet}\n`)) {
+    return { ok: false, status: 401, error: "wallet identity required" };
+  }
+  if (!verifyWalletSignature({ wallet, message: expected, signatureBase58: signature })) {
+    return { ok: false, status: 401, error: "invalid wallet signature" };
+  }
+  return { ok: true, wallet };
+}
+
+export function requireWalletAuthHeaders(cfg: AppConfig) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    if (!cfg.requireWalletAuth) return next();
+    const result = verifyRequestWalletAuth(req);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    next();
+  };
+}
+
 export function requireWalletOwner(cfg: AppConfig) {
   return (req: Request, res: Response, next: NextFunction) => {
     const owner = String(req.body?.owner || req.body?.member || req.body?.creator || "");
@@ -83,20 +120,8 @@ export function requireWalletOwner(cfg: AppConfig) {
       return next();
     }
 
-    const wallet = header(req, "x-wallet") || owner;
-    if (wallet !== owner) {
-      return res.status(401).json({ error: "wallet identity required" });
-    }
-
-    const nonce = header(req, "x-wallet-nonce");
-    const signature = header(req, "x-wallet-signature");
-    const expected = consumeChallenge(nonce);
-    if (!expected || !signature) {
-      return res.status(401).json({ error: "valid signed challenge required" });
-    }
-    if (!verifyWalletSignature({ wallet, message: expected, signatureBase58: signature })) {
-      return res.status(401).json({ error: "invalid wallet signature" });
-    }
+    const result = verifyRequestWalletAuth(req, owner);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
     next();
   };
 }

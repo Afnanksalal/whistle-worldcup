@@ -120,6 +120,17 @@
   font-style: normal;
 }
 
+.panel :global(.forecast-probabilities.is-knockout) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.panel :global(.forecast-knockout-note) {
+  margin: -0.35rem 0 0.85rem;
+  color: var(--muted);
+  font-size: var(--type-small);
+  line-height: 1.4;
+}
+
 .panel :global(.forecast-probabilities) {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

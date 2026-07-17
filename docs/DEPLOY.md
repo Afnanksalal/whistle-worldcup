@@ -67,7 +67,7 @@ anchor deploy --provider.cluster devnet
 Current playground / competition deploy (devnet):
 
 ```bash
-WHISTLE_PROGRAM_ID=3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX
+WHISTLE_PROGRAM_ID=C2vCTGZDJYvcd8jdgvFF57FnfdDsUqQy7qogjP2SmDcU
 SOLANA_KEYPAIR_PATH=/run/secrets/whistle-authority.json
 STAKE_ASSET=USDC
 SETTLEMENT_RAIL=onchain
@@ -120,7 +120,7 @@ API_CORS_ORIGIN=same-origin   # behind Caddy; or explicit https://your.host
 GROQ_API_KEY=...              # optional; grounded forecast/insight wording only
 
 # Solana on-chain (devnet program already deployed for playground)
-WHISTLE_PROGRAM_ID=3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX
+WHISTLE_PROGRAM_ID=C2vCTGZDJYvcd8jdgvFF57FnfdDsUqQy7qogjP2SmDcU
 COMPOSE_FILE=docker-compose.yml:docker-compose.onchain.yml
 WHISTLE_AUTHORITY_FILE=/opt/whistle/secrets/whistle-authority.json
 USDC_MINT=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
