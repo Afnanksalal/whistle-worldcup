@@ -33,11 +33,11 @@ const OUTCOME_LABELS: Record<string, string> = {
 
 function marketTabLabel(type: string, line?: number) {
   if (type === "match_result") return "1X2";
-  if (type === "total_goals") return `Goals ${line ?? 2.5}`;
-  if (type === "total_corners") return `Corners ${line ?? 9.5}`;
+  if (type === "total_goals") return line != null ? `Goals ${line}` : "Goals";
+  if (type === "total_corners") return line != null ? `Corners ${line}` : "Corners";
   if (type === "first_scorer") return "First scorer";
   if (type === "tournament_winner") return "Winner";
-  return type;
+  return type.replace(/_/g, " ");
 }
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
@@ -356,7 +356,13 @@ export default function MatchPageInner({
 
       <div className="match-layout">
         <div className="match-analysis">
-          {data.receipt && <SettlementReceiptCard receipt={data.receipt} />}
+          {data.receipt && (
+            <SettlementReceiptCard
+              receipt={data.receipt}
+              homeName={fixture.home.name}
+              awayName={fixture.away.name}
+            />
+          )}
 
           {(fixture.status === "live" || (live?.events && live.events.length > 0)) && (
             <section className="match-event-tape" aria-label="Match events">
@@ -380,7 +386,11 @@ export default function MatchPageInner({
               ) : (
                 <div className="reference-empty">
                   <strong>Waiting for the next event</strong>
-                  <span>The tape fills as TxLINE score actions arrive.</span>
+                  <span>
+                    {meta.fixtureSource === "txline" || meta.txlineConfigured
+                      ? "The tape fills as TxLINE score actions arrive."
+                      : "The tape fills as live match events arrive."}
+                  </span>
                 </div>
               )}
             </section>

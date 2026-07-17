@@ -354,7 +354,7 @@ export function FixtureBoard({
           <div className="source-notice" role="status">
             <span aria-hidden>i</span>
             <p>
-              <strong>Schedule preview.</strong> Picks use play units until live results are
+              <strong>Schedule preview.</strong> Picks use {stakeLabel} until live results are
               connected; unsettled matches are refunded.
             </p>
           </div>
