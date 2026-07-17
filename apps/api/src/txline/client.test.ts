@@ -19,6 +19,36 @@ describe("TxLINE normalization safety", () => {
     );
   });
 
+  it("maps native TxLINE participants and honors the home flag", () => {
+    const kickoff = Date.UTC(2026, 6, 19, 19);
+    const home = normalizeFixture({
+      FixtureId: 18257865,
+      Competition: "World Cup",
+      StartTime: kickoff,
+      Participant1: "Brazil",
+      Participant1Id: 1634,
+      Participant2: "Argentina",
+      Participant2Id: 1635,
+      Participant1IsHome: true,
+    });
+    assert.ok(home);
+    assert.equal(home.id, "18257865");
+    assert.equal(home.home.name, "Brazil");
+    assert.equal(home.away.name, "Argentina");
+    assert.equal(home.kickoffTs, kickoff);
+
+    const swapped = normalizeFixture({
+      FixtureId: 18257866,
+      StartTime: kickoff,
+      Participant1: "Brazil",
+      Participant2: "Argentina",
+      Participant1IsHome: false,
+    });
+    assert.ok(swapped);
+    assert.equal(swapped.home.name, "Argentina");
+    assert.equal(swapped.away.name, "Brazil");
+  });
+
   it("accepts explicit seconds, milliseconds, and zoned ISO timestamps", () => {
     const instant = Date.UTC(2026, 6, 19, 19);
     assert.equal(normalizeEpochMs(instant / 1000), instant);

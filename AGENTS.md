@@ -47,3 +47,14 @@ until a real TxLINE token is configured.
 
 - Deadline context: Superteam World Cup track submission needs working build, public repo, demo video, TxLINE as primary source
 - Max team size 3; AI agents OK if submission owned by a real person
+
+## Cursor Cloud specific instructions
+
+The startup update script already runs `npm install` + `npm run build:shared`. Beyond that:
+
+- **The API will not boot without an env file.** Create one once per fresh checkout: `cp .env.example .env`. The committed `.env.example` is boot-ready as-is — its placeholder `txl_…` token makes the API fall back to the free TheSportsDB schedule, and its `ADMIN_API_KEY` is already ≥16 chars. `.env` is gitignored; never commit it.
+- **For live TxLINE (primary source), set a real `TXLINE_API_TOKEN`.** Provide it via the `TXLINE_API_TOKEN` secret (not committed). To mint one, run `npm run activate-txline -w @whistle/api` — it generates/uses the wallet at `SOLANA_KEYPAIR_PATH` (`./wallet.json`, gitignored), subscribes on-chain to the devnet World Cup free tier, and prints an API token. Free-tier devnet subscriptions last ~4 weeks; re-run to rotate. With a real token, `/api/health` reports `fixtureSource: txline`; with the placeholder it reports `thesportsdb`. Devnet SOL airdrops from the default RPC are often rate-limited — the script falls back to other faucets automatically.
+- **`@whistle/shared` must be built before running the API or web** (both import from `@whistle/shared/dist`). The update script covers this, but if you edit `packages/shared`, rebuild with `npm run build:shared` — the API's `tsx watch` does not rebuild the shared package.
+- **Run order for a full local product:** `npm run dev:api` (:4000, includes keeper + WS at `/ws` + ingest) then `npm run dev:web` (:3000). Health at `GET /api/{live,ready,health}`. See README/`docs/DEPLOY.md` for the canonical commands.
+- **`.env.example` sets `REQUIRE_WALLET_AUTH=false` for dev**, so stakes can be placed against the API without a real signature (`POST /api/markets/:id/deposit` with `{outcome, amount, owner}`; `owner` must be a valid base58 Solana address, 32 bytes). In the web UI, the "Confirm" stake button still requires a connected browser Solana wallet (Phantom/Solflare/etc.), which is not installed in the cloud VM — to exercise staking headlessly, hit the API directly and the UI pool will reflect it on reload.
+- **`cargo check -p whistle` (optional on-chain program) needs Rust ≥1.85** (a transitive dep requires edition2024). The VM default toolchain may be older; install/use stable via `rustup toolchain install stable` and `rustup run stable cargo check -p whistle`. Not required for the fan product.
