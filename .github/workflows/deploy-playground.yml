@@ -77,7 +77,13 @@ jobs:
           grep -q '^ADMIN_API_KEY=.\+' .env || { echo "ADMIN_API_KEY empty" >&2; exit 1; }
           grep -q '^NEXT_PUBLIC_SITE_URL=https://.\+' .env || { echo "NEXT_PUBLIC_SITE_URL must be a public HTTPS origin" >&2; exit 1; }
           docker compose up -d --build
-          docker compose --profile tunnel up -d tunnel
+          if grep -q '^CLOUDFLARE_TUNNEL_TOKEN=.\+' .env; then
+            docker compose --profile named-tunnel up -d named-tunnel
+            docker compose --profile tunnel rm -sf tunnel || true
+          else
+            docker compose --profile tunnel up -d tunnel
+            docker compose --profile named-tunnel rm -sf named-tunnel || true
+          fi
           sleep 12
           curl -sf "http://127.0.0.1:8088/api/ready"
           docker logs playground-tunnel-1 2>&1 | grep -oE 'https://[a-zA-Z0-9.-]+\.trycloudflare\.com' | tail -1 || true

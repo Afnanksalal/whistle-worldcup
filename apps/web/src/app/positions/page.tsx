@@ -10,6 +10,7 @@ import { formatCalendarDate, useLocalTimeContext } from "../../lib/local-time";
 import { useRuntime } from "../../lib/runtime";
 import { BrandMark } from "../../components/BrandMark";
 import { FootballLoader } from "../../components/FootballLoader";
+import { useSolanaTransactions } from "../../lib/solana";
 
 type PosRow = Position & { market?: MarketPool; fixture?: Fixture };
 type View = "active" | "ready" | "history";
@@ -22,25 +23,28 @@ function outcomeLabel(position: PosRow) {
   return position.outcome === "over" ? `Over ${position.market?.line ?? ""}` : `Under ${position.market?.line ?? ""}`;
 }
 
-function payout(position: PosRow) {
+function payout(position: PosRow, feeBps = 0) {
   const market = position.market;
   if (!market) return 0;
   if (market.status === "void") return position.amount;
   if (market.status !== "settled" || market.winningOutcome !== position.outcome) return 0;
-  return payoutForPosition(
+  const gross = payoutForPosition(
     position.amount,
     market.outcomes[market.winningOutcome] || 0,
     market.totalPool
   );
+  return gross * (1 - feeBps / 10_000);
 }
 
 export default function PositionsPage() {
   const { owner, ready, withWalletAuth } = useIdentity();
-  const { stakeLabel } = useRuntime();
+  const { stakeLabel, meta } = useRuntime();
+  const { claim: claimOnchain } = useSolanaTransactions();
   const localTime = useLocalTimeContext();
   const [positions, setPositions] = useState<PosRow[]>([]);
   const [view, setView] = useState<View>("active");
   const [loading, setLoading] = useState(false);
+  const [claimingId, setClaimingId] = useState<string | null>(null);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
   const load = useCallback(async () => {
@@ -83,19 +87,47 @@ export default function PositionsPage() {
 
   const shown = view === "active" ? buckets.active : view === "ready" ? buckets.claimable : buckets.history;
   const activeStake = buckets.active.reduce((sum, position) => sum + position.amount, 0);
-  const readyAmount = buckets.claimable.reduce((sum, position) => sum + payout(position), 0);
+  const feeBps = meta.settlementRail === "onchain" ? meta.platformFeeBps : 0;
+  const readyAmount = buckets.claimable.reduce(
+    (sum, position) => sum + payout(position, feeBps),
+    0
+  );
   const returned = positions
     .filter((position) => position.claimed)
-    .reduce((sum, position) => sum + payout(position), 0);
+    .reduce((sum, position) => sum + payout(position, feeBps), 0);
 
   const claim = async (position: PosRow) => {
     if (!owner) return;
     setMessage(null);
+    setClaimingId(position.id);
     try {
+      let txSignature: string | undefined = undefined;
       const headers = await withWalletAuth();
-      const response = await api<{ payout: number; won: boolean; refund?: boolean }>(
+
+      if (meta.settlementRail === "onchain" && position.market) {
+        if (!meta.whistleProgramId || !meta.usdcMint) {
+          throw new Error("On-chain claim configuration is unavailable");
+        }
+
+        txSignature = await claimOnchain({
+          programId: meta.whistleProgramId,
+          usdcMint: meta.usdcMint,
+          fixtureId: position.market.fixtureId,
+          marketType: position.market.marketType,
+          line: position.market.line,
+          squadId: position.market.squadId,
+        });
+      }
+
+      const response = await api<{
+        payout: number;
+        grossPayout?: number;
+        fee?: number;
+        won: boolean;
+        refund?: boolean;
+      }>(
         `/positions/${position.id}/claim`,
-        { method: "POST", headers, body: JSON.stringify({ owner }) }
+        { method: "POST", headers, body: JSON.stringify({ owner, txSignature }) }
       );
       setMessage({
         tone: "success",
@@ -111,6 +143,8 @@ export default function PositionsPage() {
         tone: "error",
         text: cause instanceof Error ? cause.message : "This return could not be collected.",
       });
+    } finally {
+      setClaimingId(null);
     }
   };
 
@@ -200,7 +234,7 @@ export default function PositionsPage() {
               {shown.map((position) => {
                 const market = position.market;
                 const fixture = position.fixture;
-                const amount = payout(position);
+                const amount = payout(position, feeBps);
                 const href = market
                   ? `/match/${market.fixtureId}${market.squadId ? `?squad=${market.squadId}` : ""}`
                   : "/";
@@ -228,8 +262,17 @@ export default function PositionsPage() {
                     </div>
                     <div className="position-action">
                       {!position.claimed && (market?.status === "settled" || market?.status === "void") ? (
-                        <button type="button" className="btn btn-primary" onClick={() => void claim(position)}>
-                          {market.status === "void" ? "Collect refund" : "Collect"}
+                        <button
+                          type="button"
+                          className="btn btn-primary"
+                          disabled={claimingId !== null}
+                          onClick={() => void claim(position)}
+                        >
+                          {claimingId === position.id
+                            ? "Confirming..."
+                            : market.status === "void"
+                              ? "Collect refund"
+                              : "Collect"}
                         </button>
                       ) : position.claimed ? (
                         <span>Collected</span>

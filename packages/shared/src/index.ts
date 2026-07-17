@@ -1,3 +1,5 @@
+import { sha256 } from "@noble/hashes/sha256";
+
 export type MarketType = "match_result" | "total_goals";
 
 export type MatchResultOutcome = "home" | "draw" | "away";
@@ -256,6 +258,10 @@ export interface Position {
   outcome: MarketOutcome;
   amount: number;
   claimed: boolean;
+  deposits?: Array<{ txSignature: string; amount: number }>;
+  claimTxSignature?: string;
+  /** Legacy field retained so existing JSON ledgers continue to load. */
+  txSignature?: string;
   createdAt: number;
 }
 
@@ -279,6 +285,7 @@ export interface DepositRequest {
   outcome: MarketOutcome;
   amount: number;
   owner: string;
+  txSignature?: string;
 }
 
 export interface SettleResult {
@@ -356,3 +363,48 @@ export const TXLINE_MAINNET = {
   programId: "9ExbZjAapQww1vfcisDmrngPinHTEfpjYRWMunJgcKaA",
   txlTokenMint: "Zhw9TVKp68a1QrftncMSd6ELXKDtpVMNuMGr1jNwdeL",
 } as const;
+export function marketIdentitySeed(fixtureId: string, squadId?: string): Uint8Array {
+  if (!fixtureId.trim()) throw new Error("fixture id is required");
+  const scope = squadId?.trim() || "public";
+  return sha256(new TextEncoder().encode(`${fixtureId}\u0000${scope}`));
+}
+
+export function amountToBaseUnits(amount: number, decimals = 6): bigint {
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error("amount must be positive");
+  }
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 9) {
+    throw new Error("invalid token decimals");
+  }
+  const scale = 10 ** decimals;
+  const scaled = amount * scale;
+  const rounded = Math.round(scaled);
+  if (!Number.isSafeInteger(rounded) || Math.abs(scaled - rounded) > 1e-6) {
+    throw new Error(`amount supports at most ${decimals} decimal places`);
+  }
+  return BigInt(rounded);
+}
+
+export function outcomeToU8(marketType: MarketType, outcome: MarketOutcome): number {
+  if (marketType === "match_result") {
+    if (outcome === "home") return 0;
+    if (outcome === "draw") return 1;
+    if (outcome === "away") return 2;
+  } else {
+    if (outcome === "over") return 0;
+    if (outcome === "under") return 1;
+  }
+  throw new Error(`Invalid outcome ${outcome} for market type ${marketType}`);
+}
+
+export function u8ToOutcome(marketType: MarketType, val: number): MarketOutcome {
+  if (marketType === "match_result") {
+    if (val === 0) return "home";
+    if (val === 1) return "draw";
+    if (val === 2) return "away";
+  } else {
+    if (val === 0) return "over";
+    if (val === 1) return "under";
+  }
+  throw new Error(`Invalid u8 outcome value ${val} for market type ${marketType}`);
+}

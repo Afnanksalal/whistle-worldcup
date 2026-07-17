@@ -20,13 +20,23 @@ import {
 import { enrichFixturesWithTeamAssets } from "../fixtures/teamAssets";
 import { getState, mutate } from "../store";
 import { maybeSettleFixture } from "../settlement/keeper";
-import { enforceMarketCutoffs, voidMarketsForFixture } from "../markets/service";
+import {
+  enforceMarketCutoffs,
+  voidMarketsForFixtureWithRail,
+} from "../markets/service";
 import { bumpMetric, getLogger, markIngest } from "../observability";
 import { isPlaceholderTxlineToken } from "../config";
 
 const log = () => getLogger().child({ module: "ingest" });
 
 export type FixtureSource = "txline" | "thesportsdb";
+
+let onchainEnabled = false;
+
+/** Keep ingest void path aligned with the settlement rail. */
+export function configureIngest(useOnchain: boolean) {
+  onchainEnabled = useOnchain;
+}
 
 let activeSource: FixtureSource = "txline";
 let publicBoardLoadedAt = 0;
@@ -218,7 +228,18 @@ function applyScoreUpdate(update: ReturnType<typeof normalizeScoreUpdate>) {
   }
 
   if (update.status === "cancelled" || update.status === "postponed") {
-    voidMarketsForFixture(update.fixtureId, `fixture ${update.status}`);
+    // On-chain first, then ledger. If the rail void fails, leave markets active
+    // so USDC is not stuck while the ledger says refundable.
+    void voidMarketsForFixtureWithRail(
+      update.fixtureId,
+      `fixture ${update.status}`,
+      onchainEnabled
+    ).catch((err) => {
+      log().error(
+        { err, fixtureId: update.fixtureId, status: update.status, onchainEnabled },
+        "rail-aware fixture void failed; markets left active"
+      );
+    });
   }
 
   if (

@@ -6,21 +6,15 @@
     "dev": "next dev --port 3000",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "eslint src --max-warnings=0"
   },
   "dependencies": {
     "@solana/wallet-adapter-base": "^0.9.23",
-    "@solana/wallet-adapter-coinbase": "^0.1.23",
-    "@solana/wallet-adapter-ledger": "^0.9.29",
     "@solana/wallet-adapter-phantom": "^0.9.24",
-    "@solana/wallet-adapter-safepal": "^0.5.22",
     "@solana/wallet-adapter-solflare": "^0.6.33",
     "@solana/wallet-adapter-react": "^0.15.35",
     "@solana/wallet-adapter-react-ui": "^0.9.35",
-    "@solana/wallet-adapter-torus": "^0.11.32",
-    "@solana/wallet-adapter-trust": "^0.1.17",
     "@solana/web3.js": "^1.98.2",
-    "@solana/wallet-adapter-xdefi": "^0.1.11",
     "@whistle/shared": "*",
     "bs58": "^6.0.0",
     "next": "15.5.20",
