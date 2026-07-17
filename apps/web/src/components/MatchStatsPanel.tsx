@@ -107,7 +107,7 @@ export function MatchStatsPanel({
           Match statistics
         </h2>
         <span className="mono" style={{ color: "var(--mute)", fontSize: "0.68rem" }}>
-          {(stats?.source || "txline").toUpperCase()}
+          {(stats?.source || "feed").toUpperCase()}
           {stats ? ` · ${formatClock(stats.updatedAt, localTime)}` : ""}
         </span>
       </div>

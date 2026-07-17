@@ -30,11 +30,11 @@ const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
 function typeLabel(type: string, line?: number) {
   if (type === "match_result") return "1X2";
-  if (type === "total_goals") return `O/U ${line ?? 2.5}`;
-  if (type === "total_corners") return `Corners ${line ?? 9.5}`;
+  if (type === "total_goals") return line != null ? `O/U ${line}` : "O/U goals";
+  if (type === "total_corners") return line != null ? `Corners ${line}` : "Corners";
   if (type === "first_scorer") return "First scorer";
   if (type === "tournament_winner") return "Tournament winner";
-  return type;
+  return type.replace(/_/g, " ");
 }
 
 export default function MarketsBoardPage() {

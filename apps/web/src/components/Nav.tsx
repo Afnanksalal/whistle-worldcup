@@ -3,20 +3,12 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
-import { useEffect, useState } from "react";
+import { useEffect, useState, type CSSProperties } from "react";
+import { NAV_LINKS, type NavIcon } from "../lib/nav";
 import { useRuntime } from "../lib/runtime";
 import { BrandMark } from "./BrandMark";
 
-const links = [
-  { href: "/", label: "Matches", short: "Matches", icon: "matches" },
-  { href: "/markets", label: "Markets", short: "Markets", icon: "markets" },
-  { href: "/groups", label: "Tournament", short: "Groups", icon: "tournament" },
-  { href: "/news", label: "News", short: "News", icon: "news" },
-  { href: "/positions", label: "My picks", short: "My picks", icon: "picks" },
-  { href: "/squads", label: "Squads", short: "Squads", icon: "squads" },
-] as const;
-
-function NavGlyph({ name }: { name: (typeof links)[number]["icon"] }) {
+function NavGlyph({ name }: { name: NavIcon }) {
   return (
     <span className="mobile-nav-icon-frame" aria-hidden="true">
       <svg
@@ -143,7 +135,7 @@ export function Nav() {
               </span>
             </Link>
             <nav className="nav-links" aria-label="Primary navigation">
-              {links.map((link) => {
+              {NAV_LINKS.map((link) => {
                 const active = isActive(pathname, link.href);
                 return (
                   <Link
@@ -173,8 +165,12 @@ export function Nav() {
         </div>
       </header>
 
-      <nav className="mobile-nav" aria-label="Mobile navigation">
-        {links.map((link) => {
+      <nav
+        className="mobile-nav"
+        aria-label="Mobile navigation"
+        style={{ "--mobile-nav-count": String(NAV_LINKS.length) } as CSSProperties}
+      >
+        {NAV_LINKS.map((link) => {
           const active = isActive(pathname, link.href);
           return (
             <Link
