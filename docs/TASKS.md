@@ -22,13 +22,16 @@ Living checklist for Superteam World Cup track + production ops.
 - [x] Auto markets: 1X2, O/U goals, first scorer, corners, tournament winner
 - [x] Global `/markets` liquidity board
 - [x] Live match UX: event tape, score pulse, WS refresh, honest source badges
+- [x] TxLINE `startEpochDay` + `competitionId=72` lookback (~106 WC / ~104 finished)
+- [x] Historical score tape backfill for finished fixtures
+- [x] Devnet Whistle program deploy + config init + playground on-chain USDC overlay
 
 ## Remaining (human / ops)
 
 - [ ] Named Cloudflare tunnel (stable hostname) — needs `CLOUDFLARE_TUNNEL_TOKEN`
-- [ ] Anchor `anchor deploy` + enable USDC overlay on playground
 - [ ] Demo Loom ≤5 min + Superteam submission form
-- [ ] Seed demo liquidity before recording
+- [ ] Seed demo liquidity (devnet USDC) before recording
+- [ ] Optional: fill remaining unscored early WC tapes if TxLINE publishes them
 
 ## Ops
 

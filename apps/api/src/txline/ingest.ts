@@ -6,6 +6,7 @@ import {
 } from "@whistle/shared";
 import {
   TxlineConfig,
+  enrichFinishedFixtureScores,
   fetchFixtures,
   fetchScoresSnapshot,
   normalizeFixture,
@@ -132,10 +133,21 @@ export async function bootstrapFixtures(cfg: TxlineConfig | null) {
       mutate((s) => {
         wipeLegacyDemoIds(s);
         wipePublicFallbackIds(s);
-        for (const f of fixtures) s.fixtures[f.id] = f;
+        // Replace the board so lookback/competition filters don't keep stale rows.
+        s.fixtures = Object.fromEntries(fixtures.map((f) => [f.id, f]));
+        for (const id of Object.keys(s.live)) {
+          if (!s.fixtures[id]) delete s.live[id];
+        }
+        for (const id of Object.keys(s.odds)) {
+          if (!s.fixtures[id]) delete s.odds[id];
+        }
       }, "fixtures", fixtures);
       markIngest();
-      log().info({ count: fixtures.length }, "loaded TxLINE fixtures");
+      const finished = fixtures.filter((f) => f.status === "finished").length;
+      log().info(
+        { count: fixtures.length, finished },
+        "loaded TxLINE fixtures"
+      );
 
       const scores = await fetchScoresSnapshot(cfg);
       mutate((s) => {
@@ -144,10 +156,38 @@ export async function bootstrapFixtures(cfg: TxlineConfig | null) {
           const f = s.fixtures[sc.fixtureId];
           if (f) {
             f.score = { home: sc.homeScore, away: sc.awayScore };
-            f.status = sc.status;
+            if (sc.status === "finished" || sc.status === "live") {
+              f.status = sc.status;
+            }
           }
         }
       }, "scores", scores);
+
+      // Past WC tapes are per-fixture; backfill in the background so boot stays fast.
+      void enrichFinishedFixtureScores(cfg, fixtures, {
+        skipFixtureIds: scores.map((score) => score.fixtureId),
+      })
+        .then((historicalScores) => {
+          if (!historicalScores.length) return;
+          mutate((s) => {
+            for (const sc of historicalScores) {
+              s.live[sc.fixtureId] = sc;
+              const f = s.fixtures[sc.fixtureId];
+              if (!f) continue;
+              f.score = { home: sc.homeScore, away: sc.awayScore };
+              if (sc.status === "finished" || sc.status === "live") {
+                f.status = sc.status;
+              }
+            }
+          }, "scores", historicalScores);
+          log().info(
+            { scoresBackfilled: historicalScores.length },
+            "backfilled TxLINE historical scores"
+          );
+        })
+        .catch((err) => {
+          log().warn({ err }, "TxLINE historical score backfill failed");
+        });
       return;
     } catch (err) {
       log().warn({ err }, "TxLINE bootstrap failed — using public sports API");
@@ -173,6 +213,12 @@ export async function refreshFixtures(cfg: TxlineConfig | null) {
       const fixtures = await enrichFixturesWithTeamAssets(await fetchFixtures(cfg));
       if (!fixtures.length) throw new Error("TxLINE returned zero fixtures");
       activeSource = "txline";
+      const alreadyScored = Object.entries(getState().fixtures)
+        .filter(([, f]) => f.score?.home !== undefined && f.score?.away !== undefined)
+        .map(([id]) => id);
+      const historicalScores = await enrichFinishedFixtureScores(cfg, fixtures, {
+        skipFixtureIds: alreadyScored,
+      });
       mutate((s) => {
         wipePublicFallbackIds(s);
         for (const f of fixtures) {
@@ -197,8 +243,23 @@ export async function refreshFixtures(cfg: TxlineConfig | null) {
             : f;
           s.fixtures[f.id] = merged;
         }
+        for (const sc of historicalScores) {
+          s.live[sc.fixtureId] = sc;
+          const f = s.fixtures[sc.fixtureId];
+          if (!f) continue;
+          f.score = { home: sc.homeScore, away: sc.awayScore };
+          if (sc.status === "finished" || sc.status === "live") f.status = sc.status;
+        }
       }, "fixtures", fixtures);
       markIngest();
+      log().info(
+        {
+          count: fixtures.length,
+          finished: fixtures.filter((f) => f.status === "finished").length,
+          scoresBackfilled: historicalScores.length,
+        },
+        "refreshed TxLINE fixtures"
+      );
       return;
     } catch (error) {
       if (activeSource === "txline") throw error;

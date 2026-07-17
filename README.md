@@ -70,6 +70,14 @@ Set `ENABLE_ONCHAIN_SETTLEMENT=true`, `SETTLEMENT_RAIL=onchain`,
 keypair only after deployment. Browser clients receive the public program and
 mint addresses from `/api/meta`.
 
+Devnet program currently deployed for the playground:
+
+`WHISTLE_PROGRAM_ID=3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX`
+
+For the full World Cup board (including ~104 finished matches), set
+`TXLINE_COMPETITION_IDS=72` and `TXLINE_FIXTURE_LOOKBACK_DAYS=50` (defaults in
+Compose). Bare TxLINE snapshots only return the current live window.
+
 ## Scripts
 
 | Command | Description |

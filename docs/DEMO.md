@@ -1,6 +1,9 @@
 # Demo video outline (≤5 min)
 
-Record against the **live playground rail** (`/api/health`). Default is ledger/`units` with TxLINE verification. Only film Phantom USDC if on-chain overlay is enabled end-to-end.
+Record against the **live playground rail** (`/api/health`). Expect
+`fixtureSource: txline`, ~106 World Cup fixtures (~104 in Results), and — when
+the on-chain overlay is up — `settlementRail: onchain`, `stakeAsset: USDC`,
+`whistleProgramId: 3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX`.
 
 ## 1. Problem (30s)
 
@@ -9,9 +12,10 @@ World Cup fans want to stake with friends and get paid at full-time. Sportsbooks
 ## 2. Product walkthrough (2.5 min)
 
 - **Landing** — live board, TxLINE badge, kickoff countdowns
+- **Results** — open the Results filter and scroll the ~104 finished WC matches (lookback board)
 - **Markets board** (`/markets`) — volume, implied probs, reference odds
 - **Tournament** (`/groups`) + **News** (`/news`)
-- **Open a match** — stake on 1X2 / goals / first scorer / corners; show pool % + forecast vs crowd
+- **Open a match** — stake on remaining knockouts (1X2 / goals / first scorer / corners); show pool % + forecast vs crowd
 - **Live tape** — score pulse + TxLINE event feed during a live match (or show finished match events)
 - **Connect wallet** — sign challenge → stake play units (or USDC if on-chain is live)
 - **Positions** (`/positions`) — active / claimable

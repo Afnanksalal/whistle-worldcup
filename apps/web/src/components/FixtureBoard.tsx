@@ -131,8 +131,9 @@ export function FixtureBoard({
 
   const shown = useMemo(() => {
     if (filter === "live") return live;
-    if (filter === "results") return results.slice(0, 18);
-    return upcoming.slice(0, 18);
+    // Full WC board is ~104 finished + a few remaining; show the tournament tape.
+    if (filter === "results") return results.slice(0, 120);
+    return upcoming.slice(0, 24);
   }, [filter, live, results, upcoming]);
 
   const grouped = useMemo(() => {
