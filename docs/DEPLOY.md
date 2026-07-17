@@ -64,16 +64,23 @@ anchor deploy --provider.cluster devnet
 
 ### Update .env with real Program ID
 
+Current playground / competition deploy (devnet):
+
 ```bash
-# Replace the placeholder in your .env
-WHISTLE_PROGRAM_ID=<program_id_from_anchor_deploy>
+WHISTLE_PROGRAM_ID=3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX
 SOLANA_KEYPAIR_PATH=/run/secrets/whistle-authority.json
 STAKE_ASSET=USDC
 SETTLEMENT_RAIL=onchain
 ENABLE_ONCHAIN_SETTLEMENT=true
 USDC_MINT=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU   # devnet USDC
 PLATFORM_FEE_BPS=250
+TXLINE_COMPETITION_IDS=72
+TXLINE_FIXTURE_LOOKBACK_DAYS=50
 ```
+
+Authority keypair lives at `secrets/whistle-authority.json` on the host (never
+commit). Fresh USDC mode needs a clean API ledger volume — leftover play-unit
+positions fail the on-chain boot check.
 
 ### Initialize the program on-chain (one-time)
 
@@ -112,13 +119,20 @@ NEXT_PUBLIC_SITE_URL=https://your-public-origin.example
 API_CORS_ORIGIN=same-origin   # behind Caddy; or explicit https://your.host
 GROQ_API_KEY=...              # optional; grounded forecast/insight wording only
 
-# Solana on-chain (once deployed)
-WHISTLE_PROGRAM_ID=<deployed_id>
+# Solana on-chain (devnet program already deployed for playground)
+WHISTLE_PROGRAM_ID=3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX
 COMPOSE_FILE=docker-compose.yml:docker-compose.onchain.yml
 WHISTLE_AUTHORITY_FILE=/opt/whistle/secrets/whistle-authority.json
 USDC_MINT=4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU
 PLATFORM_FEE_BPS=250
 REQUIRE_WALLET_AUTH=true
+STAKE_ASSET=USDC
+SETTLEMENT_RAIL=onchain
+ENABLE_ONCHAIN_SETTLEMENT=true
+
+# Full World Cup board (past + remaining)
+TXLINE_COMPETITION_IDS=72
+TXLINE_FIXTURE_LOOKBACK_DAYS=50
 
 # Stable Cloudflare hostname; omit only when using the temporary quick tunnel
 CLOUDFLARE_TUNNEL_TOKEN=<named_tunnel_token>

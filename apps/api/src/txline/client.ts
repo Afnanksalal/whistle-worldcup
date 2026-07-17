@@ -135,6 +135,61 @@ function teamFrom(raw: unknown, fallback: string): Fixture["home"] {
   };
 }
 
+/** Home/away goals from native TxLINE Score / Stats payloads. */
+export function pickTxlineGoals(raw: Record<string, unknown>): {
+  home?: number;
+  away?: number;
+} {
+  const stats = (raw.Stats ?? raw.stats) as Record<string, unknown> | undefined;
+  const score = (raw.Score ?? raw.score) as Record<string, unknown> | undefined;
+
+  let p1 = stats ? pickNumber(stats, ["1"]) : undefined;
+  let p2 = stats ? pickNumber(stats, ["2"]) : undefined;
+
+  if (score) {
+    const p1Node = (score.Participant1 ?? score.participant1) as
+      | Record<string, unknown>
+      | undefined;
+    const p2Node = (score.Participant2 ?? score.participant2) as
+      | Record<string, unknown>
+      | undefined;
+    const p1Total = (p1Node?.Total ?? p1Node?.total ?? p1Node) as
+      | Record<string, unknown>
+      | undefined;
+    const p2Total = (p2Node?.Total ?? p2Node?.total ?? p2Node) as
+      | Record<string, unknown>
+      | undefined;
+    p1 = p1 ?? pickNumber(p1Total || {}, ["Goals", "goals"]);
+    p2 = p2 ?? pickNumber(p2Total || {}, ["Goals", "goals"]);
+  }
+
+  if (p1 === undefined && p2 === undefined) return {};
+  const p1IsHome = raw.Participant1IsHome ?? raw.participant1IsHome;
+  if (p1IsHome === false) return { home: p2, away: p1 };
+  return { home: p1, away: p2 };
+}
+
+function utcEpochDay(ms = Date.now()): number {
+  return Math.floor(ms / 86_400_000);
+}
+
+/** Comma-separated competition ids; default World Cup (72). Use * for all. */
+export function txlineCompetitionIds(): string[] | null {
+  const raw = (process.env.TXLINE_COMPETITION_IDS ?? "72").trim();
+  if (!raw || raw === "*") return null;
+  return raw
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+/** Days to walk `startEpochDay` backward so finished WC fixtures stay on the board. */
+export function txlineFixtureLookbackDays(): number {
+  const n = Number(process.env.TXLINE_FIXTURE_LOOKBACK_DAYS ?? 50);
+  if (!Number.isFinite(n) || n < 0) return 50;
+  return Math.min(Math.floor(n), 180);
+}
+
 export function normalizeFixture(raw: unknown): Fixture | null {
   if (!raw || typeof raw !== "object") return null;
   const o = raw as Record<string, unknown>;
@@ -185,23 +240,42 @@ export function normalizeFixture(raw: unknown): Fixture | null {
   // A fabricated "now" kickoff opens/closes markets at arbitrary times.
   if (kickoff === null) return null;
 
-  const statusRaw = (pickString(o, ["status", "Status", "state"]) || "").toLowerCase();
+  const statusRaw = (pickString(o, ["status", "Status", "state", "GameState"]) || "").toLowerCase();
+  const gameState = pickNumber(o, ["GameState", "gameState", "game_state"]);
   let status: Fixture["status"] = "scheduled";
-  if (statusRaw.includes("live") || statusRaw.includes("inplay") || statusRaw.includes("progress")) {
+  if (statusRaw.includes("live") || statusRaw.includes("inplay") || statusRaw.includes("progress") || gameState === 2) {
     status = "live";
-  } else if (statusRaw.includes("final") || statusRaw.includes("finished") || statusRaw.includes("ended")) {
+  } else if (
+    statusRaw.includes("final") ||
+    statusRaw.includes("finished") ||
+    statusRaw.includes("ended") ||
+    gameState === 3
+  ) {
     status = "finished";
   } else if (statusRaw.includes("postpon")) {
     status = "postponed";
   } else if (statusRaw.includes("cancel") || statusRaw.includes("abandon")) {
     status = "cancelled";
+  } else if (
+    // TxLINE free-tier snapshots often omit status for completed WC matches.
+    status === "scheduled" &&
+    kickoff + 2.5 * 60 * 60 * 1000 < Date.now()
+  ) {
+    status = "finished";
   }
 
   const homeScore = pickNumber(o, ["homeScore", "HomeScore", "scoreHome"]);
   const awayScore = pickNumber(o, ["awayScore", "AwayScore", "scoreAway"]);
   const nestedScore = o.score as Record<string, unknown> | undefined;
-  const hs = homeScore ?? pickNumber(nestedScore || {}, ["home", "Home"]);
-  const as = awayScore ?? pickNumber(nestedScore || {}, ["away", "Away"]);
+  const fromTxline = pickTxlineGoals(o);
+  const hs =
+    homeScore ??
+    pickNumber(nestedScore || {}, ["home", "Home"]) ??
+    fromTxline.home;
+  const as =
+    awayScore ??
+    pickNumber(nestedScore || {}, ["away", "Away"]) ??
+    fromTxline.away;
 
   return {
     id,
@@ -343,19 +417,22 @@ export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
   const fixtureId = pickString(o, ["fixtureId", "id", "FixtureId", "fixture_id"]);
   if (!fixtureId) return null;
 
+  const txlineGoals = pickTxlineGoals(o);
   const homeScore =
     pickNumber(o, ["homeScore", "HomeScore", "scoreHome", "home"]) ??
-    pickNumber((o.score as Record<string, unknown>) || {}, ["home", "Home"]);
+    pickNumber((o.score as Record<string, unknown>) || {}, ["home", "Home"]) ??
+    txlineGoals.home;
   const awayScore =
     pickNumber(o, ["awayScore", "AwayScore", "scoreAway", "away"]) ??
-    pickNumber((o.score as Record<string, unknown>) || {}, ["away", "Away"]);
+    pickNumber((o.score as Record<string, unknown>) || {}, ["away", "Away"]) ??
+    txlineGoals.away;
 
   const statusId = pickNumber(o, ["statusId", "StatusId", "status_id"]);
   const action = pickString(o, ["action", "Action", "event"]);
   const period = pickString(o, ["period", "Period"]) ?? pickNumber(o, ["period", "Period"]);
 
   let status: Fixture["status"] = "unknown";
-  const statusRaw = (pickString(o, ["status", "Status"]) || "").toLowerCase();
+  const statusRaw = (pickString(o, ["status", "Status", "GameState"]) || "").toLowerCase();
   if (statusRaw.includes("cancel") || statusRaw.includes("abandon")) {
     status = "cancelled";
   } else if (statusRaw.includes("postpon")) {
@@ -367,7 +444,8 @@ export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
   ) {
     status = "finished";
   } else if (statusRaw.includes("schedul") || statusRaw.includes("pre")) {
-    status = "scheduled";
+    // Native tapes often label every row GameState=scheduled, including finals.
+    status = isFinalScoreRecord({ action, statusId, period }) ? "finished" : "scheduled";
   } else if (
     statusRaw.includes("live") ||
     statusRaw.includes("inplay") ||
@@ -383,7 +461,8 @@ export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
     return null;
   }
 
-  const eventTs = pickTimestamp(o, ["ts", "timestamp", "Timestamp"]) ?? Date.now();
+  const eventTs =
+    pickTimestamp(o, ["ts", "timestamp", "Timestamp", "Ts"]) ?? Date.now();
   const events = extractScoreEvents(raw);
 
   return {
@@ -400,24 +479,86 @@ export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
   };
 }
 
+/** Prefer the official final row; otherwise the latest row that carries goals. */
+export function pickBestScoreRecord(records: unknown[]): unknown | null {
+  const list = records.filter((item) => item && typeof item === "object");
+  if (!list.length) return null;
+
+  for (const item of list) {
+    const o = item as Record<string, unknown>;
+    const action = pickString(o, ["action", "Action", "event"]);
+    const statusId = pickNumber(o, ["statusId", "StatusId", "status_id"]);
+    const period =
+      pickString(o, ["period", "Period"]) ?? pickNumber(o, ["period", "Period"]);
+    if (isFinalScoreRecord({ action, statusId, period })) return item;
+  }
+
+  for (let i = list.length - 1; i >= 0; i -= 1) {
+    const goals = pickTxlineGoals(list[i] as Record<string, unknown>);
+    if (goals.home !== undefined && goals.away !== undefined) return list[i];
+  }
+  return list[list.length - 1];
+}
+
+function mergeFixtures(into: Map<string, Fixture>, batch: Fixture[]) {
+  for (const fixture of batch) into.set(fixture.id, fixture);
+}
+
 export async function fetchFixtures(cfg: TxlineConfig): Promise<Fixture[]> {
-  const paths = [
-    `/api/fixtures`,
-    `/api/fixtures/snapshot`,
-    `/api/fixtures/current`,
-  ];
+  const lookbackDays = txlineFixtureLookbackDays();
+  const startEpochDay = utcEpochDay() - lookbackDays;
+  const competitionIds = txlineCompetitionIds();
   const errors: string[] = [];
-  for (const p of paths) {
+  const merged = new Map<string, Fixture>();
+
+  const snapshotPaths: string[] = [];
+  if (competitionIds?.length) {
+    for (const competitionId of competitionIds) {
+      snapshotPaths.push(
+        `/api/fixtures/snapshot?startEpochDay=${startEpochDay}&competitionId=${encodeURIComponent(competitionId)}`
+      );
+      // Also pull the live window for that competition (late knockout fixtures).
+      snapshotPaths.push(
+        `/api/fixtures/snapshot?competitionId=${encodeURIComponent(competitionId)}`
+      );
+    }
+  } else {
+    snapshotPaths.push(
+      `/api/fixtures/snapshot?startEpochDay=${startEpochDay}`,
+      `/api/fixtures/snapshot`,
+      `/api/fixtures/current`,
+      `/api/fixtures`
+    );
+  }
+
+  for (const path of snapshotPaths) {
     try {
-      const data = await getJson<unknown>(`${cfg.apiOrigin}${p}`, cfg);
+      const data = await getJson<unknown>(`${cfg.apiOrigin}${path}`, cfg);
       const fixtures = asArray(data)
         .map(normalizeFixture)
         .filter((f): f is Fixture => !!f);
-      if (fixtures.length) return fixtures;
+      if (fixtures.length) mergeFixtures(merged, fixtures);
     } catch (e) {
-      errors.push(String(e));
+      errors.push(`${path}: ${String(e)}`);
     }
   }
+
+  // Last-resort unfiltered snapshot only when a competition filter returned nothing.
+  if (!merged.size && competitionIds?.length) {
+    for (const path of [`/api/fixtures/snapshot`, `/api/fixtures/current`]) {
+      try {
+        const data = await getJson<unknown>(`${cfg.apiOrigin}${path}`, cfg);
+        const fixtures = asArray(data)
+          .map(normalizeFixture)
+          .filter((f): f is Fixture => !!f);
+        if (fixtures.length) mergeFixtures(merged, fixtures);
+      } catch (e) {
+        errors.push(`${path}: ${String(e)}`);
+      }
+    }
+  }
+
+  if (merged.size) return [...merged.values()].sort((a, b) => a.kickoffTs - b.kickoffTs);
   throw new Error(`fixtures fetch failed: ${errors.join(" | ")}`);
 }
 
@@ -440,20 +581,67 @@ export async function fetchHistoricalScores(
   cfg: TxlineConfig,
   fixtureId: string
 ): Promise<unknown[]> {
+  const encoded = encodeURIComponent(fixtureId);
   const paths = [
-    `/api/scores/historical?fixtureId=${encodeURIComponent(fixtureId)}`,
-    `/api/scores/by-fixture/${encodeURIComponent(fixtureId)}`,
-    `/api/scores/fixture/${encodeURIComponent(fixtureId)}`,
+    `/api/scores/snapshot/${encoded}`,
+    `/api/scores/historical/${encoded}`,
+    `/api/scores/historical?fixtureId=${encoded}`,
+    `/api/scores/by-fixture/${encoded}`,
+    `/api/scores/fixture/${encoded}`,
   ];
   for (const p of paths) {
     try {
       const data = await getJson<unknown>(`${cfg.apiOrigin}${p}`, cfg);
-      return asArray(data);
+      const rows = asArray(data);
+      if (rows.length) return rows;
     } catch {
       // next
     }
   }
   return [];
+}
+
+/** Pull final (or best) score rows for finished fixtures that lack a score. */
+export async function enrichFinishedFixtureScores(
+  cfg: TxlineConfig,
+  fixtures: Fixture[],
+  opts?: { concurrency?: number; skipFixtureIds?: Iterable<string> }
+): Promise<LiveScoreUpdate[]> {
+  const concurrency = Math.max(1, Math.min(opts?.concurrency ?? 6, 12));
+  const skip = new Set(opts?.skipFixtureIds ?? []);
+  const targets = fixtures.filter(
+    (fixture) =>
+      fixture.status === "finished" &&
+      !skip.has(fixture.id) &&
+      (fixture.score?.home === undefined || fixture.score?.away === undefined)
+  );
+  const out: LiveScoreUpdate[] = [];
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < targets.length) {
+      const index = cursor;
+      cursor += 1;
+      const fixture = targets[index];
+      try {
+        const tape = await fetchHistoricalScores(cfg, fixture.id);
+        const best = pickBestScoreRecord(tape);
+        const update = best ? normalizeScoreUpdate(best) : null;
+        if (update) {
+          // Force finished for past kickoffs even if the tape row is mislabeled.
+          if (fixture.kickoffTs + 2.5 * 60 * 60 * 1000 < Date.now()) {
+            update.status = "finished";
+          }
+          out.push(update);
+        }
+      } catch {
+        // skip fixture
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
+  return out;
 }
 
 export async function fetchStatValidationV2(

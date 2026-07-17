@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 
-declare_id!("2HksLYwcJhcBuJQtBLauQaViE6zBRv1CWuQoYyeE1ioK");
+declare_id!("3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX");
 
 pub const TXORACLE_DEVNET: Pubkey = pubkey!("6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J");
 pub const MAX_FEE_BPS: u16 = 1_000;

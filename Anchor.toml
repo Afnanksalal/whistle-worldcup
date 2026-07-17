@@ -6,10 +6,10 @@ resolution = true
 skip-lint = false
 
 [programs.devnet]
-whistle = "2HksLYwcJhcBuJQtBLauQaViE6zBRv1CWuQoYyeE1ioK"
+whistle = "3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX"
 
 [programs.localnet]
-whistle = "WHisTLE111111111111111111111111111111111111"
+whistle = "3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX"
 
 [registry]
 url = "https://api.apr.dev"

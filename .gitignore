@@ -21,3 +21,4 @@ infra/playground/.env
 
 apps/web/out/
 packages/shared/dist/
+secrets/

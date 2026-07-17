@@ -44,6 +44,17 @@ Browser → Next.js (VPS) → Caddy → Whistle API
 | `WHISTLE_PROGRAM_ID` / `USDC_MINT` | Required in on-chain mode and checked against deployed accounts at boot |
 | `WHISTLE_AUTHORITY_KEY` / `SOLANA_KEYPAIR_PATH` | Exactly one usable keeper authority source is required in on-chain mode |
 | `PLATFORM_FEE_BPS` | On-chain fee, default 250 and hard-capped at 1000; must match the config PDA |
+| `TXLINE_COMPETITION_IDS` | Comma-separated competition ids for snapshot fetch; default `72` (World Cup). Use `*` for all free-tier competitions |
+| `TXLINE_FIXTURE_LOOKBACK_DAYS` | Days subtracted from today's UTC epoch day for `startEpochDay` (default `50`) so finished WC matches stay on the board |
+
+### Devnet program (deployed)
+
+| Item | Value |
+|------|-------|
+| Program ID | `3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX` |
+| USDC mint (devnet) | `4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU` |
+| Config PDA | Derived from `[b"whistle_config"]` (see `scripts/init-program.js` output) |
+| Authority key | Host file under `secrets/` (gitignored); mounted via `docker-compose.onchain.yml` |
 
 ## TxLINE endpoints (when live)
 
@@ -51,10 +62,11 @@ Browser → Next.js (VPS) → Caddy → Whistle API
 |----------|-----|
 | `POST /auth/guest/start` | Guest JWT |
 | `POST /api/token/activate` | API token after on-chain subscribe |
-| `GET /api/fixtures` (+ snapshot fallbacks) | Schedule |
-| `GET /api/scores` / snapshot | Score bootstrap |
-| `GET /api/scores/historical?fixtureId=` | Final records for settle |
-| `GET /api/scores/stat-validation-v2` | Merkle proof payload for settle + receipt |
+| `GET /api/fixtures/snapshot?startEpochDay=&competitionId=` | Full WC schedule (lookback + competition filter) |
+| `GET /api/scores` / collection snapshot | Live score bootstrap (often empty on free tier) |
+| `GET /api/scores/snapshot/{fixtureId}` | Per-fixture score tape; prefer `game_finalised` row |
+| `GET /api/scores/historical/{fixtureId}` | Official historical path (window-limited) |
+| `GET /api/scores/stat-validation` (+ v2 query shapes) | Merkle proof payload for settle + receipt |
 | `GET /api/scores/stream` (SSE) | Live scores + soccer event actions |
 | `GET /api/odds/stream` (SSE) | Reference odds |
 | `GET /api/fixtures/:id/receipt` | Persisted settlement receipt (seq, Merkle summary, PDA) |
@@ -83,6 +95,21 @@ is already set it only smoke-tests `/api/fixtures/snapshot`. Tune with
 TxLINE fixtures arrive as `Participant1`/`Participant2` with a `Participant1IsHome`
 flag; `normalizeFixture` maps these to `home`/`away` (honoring the flag) so live
 schedule cards show real team names, falling back to nested `home`/`team1` shapes.
+
+### Full WC board (the “104” matches)
+
+A bare `GET /api/fixtures/snapshot` defaults to the **current UTC day** and only
+returns the free-tier live window (often ~8 WC + friendlies). The OpenAPI
+`startEpochDay` parameter selects fixtures that start at or within ~30 days after
+that epoch day. Whistle pages:
+
+1. `snapshot?startEpochDay={today-lookback}&competitionId=72`
+2. `snapshot?competitionId=72` (current window / remaining knockouts)
+
+Kickoffs older than ~2.5h with no live status are marked `finished`. Finished
+fixtures without scores are backfilled asynchronously from
+`/api/scores/snapshot/{fixtureId}` (preferring `game_finalised`). The Results
+tab shows up to 120 finished matches.
 
 ## Public product API (Whistle)
 
