@@ -17,6 +17,7 @@ import {
   fetchPublicFixtures,
   isCurrentWorldCupPublicFixture,
 } from "../fixtures/publicSchedule";
+import { enrichFixturesWithTeamAssets } from "../fixtures/teamAssets";
 import { getState, mutate } from "../store";
 import { maybeSettleFixture } from "../settlement/keeper";
 import { enforceMarketCutoffs, voidMarketsForFixture } from "../markets/service";
@@ -115,7 +116,7 @@ export async function bootstrapFixtures(cfg: TxlineConfig | null) {
   if (cfg?.apiToken && !isPlaceholderTxlineToken(cfg.apiToken)) {
     // Prefer real TxLINE when token does not look like our local placeholder
     try {
-      const fixtures = await fetchFixtures(cfg);
+      const fixtures = await enrichFixturesWithTeamAssets(await fetchFixtures(cfg));
       if (!fixtures.length) throw new Error("TxLINE returned zero fixtures");
       activeSource = "txline";
       mutate((s) => {
@@ -159,14 +160,32 @@ export async function refreshFixtures(cfg: TxlineConfig | null) {
   if (shouldTryTxline && cfg) {
     lastTxlineRetryAt = Date.now();
     try {
-      const fixtures = await fetchFixtures(cfg);
+      const fixtures = await enrichFixturesWithTeamAssets(await fetchFixtures(cfg));
       if (!fixtures.length) throw new Error("TxLINE returned zero fixtures");
       activeSource = "txline";
       mutate((s) => {
         wipePublicFallbackIds(s);
         for (const f of fixtures) {
           const prev = s.fixtures[f.id];
-          s.fixtures[f.id] = prev ? { ...prev, ...f, score: f.score ?? prev.score } : f;
+          // Keep prior UI assets if a refresh briefly fails badge lookup.
+          const merged = prev
+            ? {
+                ...prev,
+                ...f,
+                score: f.score ?? prev.score,
+                home: {
+                  ...f.home,
+                  logo: f.home.logo || prev.home.logo,
+                  shortName: f.home.shortName || prev.home.shortName,
+                },
+                away: {
+                  ...f.away,
+                  logo: f.away.logo || prev.away.logo,
+                  shortName: f.away.shortName || prev.away.shortName,
+                },
+              }
+            : f;
+          s.fixtures[f.id] = merged;
         }
       }, "fixtures", fixtures);
       markIngest();

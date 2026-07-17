@@ -150,7 +150,10 @@ function applyEventCounters(
 
 function tsdbId(fixture: Fixture): string | null {
   if (fixture.id.startsWith("tsdb-")) return fixture.id.slice(5);
-  const raw = fixture.raw as { idEvent?: string } | undefined;
+  const raw = fixture.raw as
+    | { idEvent?: string; tsdbEventId?: string }
+    | undefined;
+  if (raw?.tsdbEventId) return String(raw.tsdbEventId);
   return raw?.idEvent ? String(raw.idEvent) : null;
 }
 

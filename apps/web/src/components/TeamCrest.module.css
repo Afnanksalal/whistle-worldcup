@@ -13,10 +13,10 @@
   background: var(--paper);
   color: var(--forest);
   font-family: var(--font-data), monospace;
-  font-size: calc(var(--team-crest-size) * 0.22);
+  font-size: calc(var(--team-crest-size) * 0.3);
   font-weight: 700;
-  letter-spacing: 0.035em;
-  line-height: 1;
+  letter-spacing: 0.02em;
+  line-height: 1.1;
   text-transform: uppercase;
 }
 

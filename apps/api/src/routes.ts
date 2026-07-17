@@ -29,6 +29,10 @@ import { priceHistoryForFixture } from "./markets/prices";
 import { getMatchStats, refreshMatchStats } from "./match/stats";
 import { buildInsights, getInsights } from "./insights";
 import { getCachedMatchForecast, getMatchForecast } from "./forecast";
+import {
+  getCachedMatchInfo,
+  resolveMatchInfo,
+} from "./fixtures/matchContext";
 
 declare global {
   namespace Express {
@@ -139,15 +143,18 @@ export function createRouter(cfg: AppConfig) {
     }
     const forecast = getCachedMatchForecast(fixture.id);
     if (!forecast) void getMatchForecast(fixture.id).catch(() => undefined);
+    const matchInfo = getCachedMatchInfo(fixture.id);
+    if (!matchInfo) void resolveMatchInfo(fixture.id).catch(() => undefined);
 
     res.json({
-      fixture: publicFixture(fixture),
+      fixture: publicFixture(getState().fixtures[fixture.id] || fixture),
       serverNow: Date.now(),
       live,
       odds,
       markets,
       priceHistory: priceHistoryForFixture(fixture.id),
       stats: getMatchStats(fixture.id),
+      matchInfo: matchInfo || getCachedMatchInfo(fixture.id),
       insights: getInsights(fixture.id),
       forecast,
       meta: publicMeta(cfg, getFixtureSource()),
@@ -165,6 +172,7 @@ export function createRouter(cfg: AppConfig) {
 
   router.get("/fixtures/:id/forecast", async (req, res) => {
     try {
+      void resolveMatchInfo(req.params.id).catch(() => undefined);
       const forecast = await getMatchForecast(req.params.id);
       if (!forecast) return res.status(404).json({ error: "fixture not found" });
       const maxAge = forecast.model.phase === "live" ? 15 : 60;
@@ -180,9 +188,25 @@ export function createRouter(cfg: AppConfig) {
 
   router.get("/fixtures/:id/stats", async (req, res) => {
     try {
+      // Resolve TheSportsDB event id for TxLINE fixtures before stats pull.
+      await resolveMatchInfo(req.params.id).catch(() => undefined);
       const stats =
         (await refreshMatchStats(req.params.id)) || getMatchStats(req.params.id);
-      res.json({ stats });
+      res.json({
+        stats,
+        matchInfo: getCachedMatchInfo(req.params.id),
+      });
+    } catch (e) {
+      res.status(500).json({ error: String(e) });
+    }
+  });
+
+  router.get("/fixtures/:id/match-info", async (req, res) => {
+    try {
+      const matchInfo =
+        (await resolveMatchInfo(req.params.id)) || getCachedMatchInfo(req.params.id);
+      if (!matchInfo) return res.status(404).json({ error: "match info unavailable" });
+      res.json({ matchInfo });
     } catch (e) {
       res.status(500).json({ error: String(e) });
     }

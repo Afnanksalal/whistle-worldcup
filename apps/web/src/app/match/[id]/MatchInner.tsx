@@ -217,7 +217,17 @@ export default function MatchPageInner({
             >
               {formatKickoff(fixture.kickoffTs, timeContext)}
             </time>
-            {fixture.venue && <span>{fixture.venue}</span>}
+            {(fixture.venue || data?.matchInfo?.venue) && (
+              <span>{fixture.venue || data?.matchInfo?.venue}</span>
+            )}
+            {data?.matchInfo?.city && <span>{data.matchInfo.city}</span>}
+            {(data?.matchInfo?.homeFormation || data?.matchInfo?.awayFormation) && (
+              <span>
+                {[data.matchInfo.homeFormation, data.matchInfo.awayFormation]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+            )}
           </div>
         </div>
 

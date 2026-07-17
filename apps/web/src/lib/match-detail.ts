@@ -3,6 +3,7 @@ import type {
   InsightCard,
   LiveScoreUpdate,
   MatchForecast,
+  MatchInfo,
   MarketPool,
   MatchStats,
   OddsQuote,
@@ -17,6 +18,7 @@ export type MatchDetail = {
   markets: MarketPool[];
   priceHistory?: Record<string, PricePoint[]>;
   stats?: MatchStats | null;
+  matchInfo?: MatchInfo | null;
   insights?: InsightCard[];
   forecast?: MatchForecast | null;
 };

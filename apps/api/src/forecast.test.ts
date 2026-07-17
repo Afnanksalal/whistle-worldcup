@@ -85,7 +85,15 @@ describe("deterministic match forecast", () => {
     assert.ok(
       forecast.confidence.reasons.some((reason) => reason.includes("Player availability"))
     );
-    assert.equal(forecast.version, "whistle-poisson-v1");
+    assert.equal(forecast.version, "whistle-poisson-v2");
+    assert.ok(forecast.factors?.length);
+    assert.ok(forecast.factors?.some((factor) => factor.id === "recent_form" && factor.available));
+    assert.ok(forecast.factors?.some((factor) => factor.id === "injuries" && !factor.available));
+    // H2H sample is 1 in fixture history — available for evidence, blend needs 2+.
+    assert.equal(
+      forecast.factors?.find((factor) => factor.id === "head_to_head")?.appliedWeight,
+      0
+    );
   });
 
   it("uses a transparent low-confidence prior when team history is absent", () => {
