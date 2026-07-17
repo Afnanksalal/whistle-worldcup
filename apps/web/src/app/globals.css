@@ -1741,10 +1741,10 @@ a.panel:hover {
     display: block;
     max-width: 100%;
     overflow: hidden;
-    font-size: 0.58rem;
+    font-size: 0.62rem;
     font-weight: 700;
     letter-spacing: -0.02em;
-    line-height: 1.1;
+    line-height: 1.15;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -1761,11 +1761,22 @@ a.panel:hover {
     min-height: 3.9rem;
     padding-inline: 0.1rem;
   }
-  .mobile-nav-label { font-size: 0.54rem; }
+  .mobile-nav-label { font-size: 0.58rem; }
   .mobile-nav-icon {
     width: 1.18rem;
     height: 1.18rem;
   }
+}
+
+.forecast-knockout-note {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+  font-size: var(--type-small);
+  line-height: 1.4;
+}
+
+.forecast-probabilities.is-knockout {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 @media (max-width: 720px) {

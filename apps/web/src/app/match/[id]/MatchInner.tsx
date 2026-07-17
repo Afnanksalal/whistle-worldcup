@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Fixture, MarketOutcome, MatchForecast } from "@whistle/shared";
 import { impliedShares, isKnockoutMatchResult } from "@whistle/shared";
-import { api, statusLabel } from "../../../lib/api";
+import { api, statusLabel, wsUrl } from "../../../lib/api";
 import { useIdentity } from "../../../lib/identity";
 import {
   formatClock,
@@ -49,7 +49,7 @@ function marketTabLabel(
 
 const number = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 });
 
-function friendlyStakeError(cause: unknown): string {
+function friendlyStakeError(cause: unknown, stakeLabel = "units"): string {
   const message = cause instanceof Error ? cause.message : String(cause || "");
   if (
     /0x177d/i.test(message) ||
@@ -59,7 +59,10 @@ function friendlyStakeError(cause: unknown): string {
     return "This wallet already has a pick on the other side of this market. Add to the same outcome, or use another wallet.";
   }
   if (/Simulation failed/i.test(message) && message.length > 220) {
-    return "The on-chain stake could not be simulated. Check your USDC balance and try again.";
+    return `The on-chain stake could not be simulated. Check your ${stakeLabel} balance and try again.`;
+  }
+  if (/valid signed challenge|wallet identity/i.test(message)) {
+    return "Wallet signature required. Reconnect your wallet and confirm again.";
   }
   return message || "The prediction could not be confirmed.";
 }
@@ -156,8 +159,7 @@ export default function MatchPageInner({
   }, [data?.fixture.status, load]);
 
   useEffect(() => {
-    const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-    const socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
+    const socket = new WebSocket(wsUrl());
     socket.onmessage = (event) => {
       try {
         const message = JSON.parse(String(event.data)) as { event?: string };
@@ -223,22 +225,30 @@ export default function MatchPageInner({
     setNotice(null);
     try {
       let txSignature: string | undefined = undefined;
-      const headers = await withWalletAuth();
       const outcome = selectedOutcome as MarketOutcome;
 
       if (meta.settlementRail === "onchain") {
         if (!meta.whistleProgramId || !meta.usdcMint) {
           throw new Error("On-chain staking configuration is unavailable");
         }
+        // Challenges are single-use — sign once for prepare, again for deposit.
+        const prepareHeaders = await withWalletAuth();
         try {
-          await api(`/markets/${market.id}/prepare`, { method: "POST" });
+          await api(`/markets/${market.id}/prepare`, {
+            method: "POST",
+            headers: prepareHeaders,
+          });
         } catch (prepareError) {
           const message =
             prepareError instanceof Error ? prepareError.message : String(prepareError);
           // One automatic retry helps when public Solana RPC rate-limits create_market.
           if (message.includes("could not be prepared") || message.includes("429")) {
             await new Promise((resolve) => setTimeout(resolve, 1500));
-            await api(`/markets/${market.id}/prepare`, { method: "POST" });
+            const retryHeaders = await withWalletAuth();
+            await api(`/markets/${market.id}/prepare`, {
+              method: "POST",
+              headers: retryHeaders,
+            });
           } else {
             throw prepareError;
           }
@@ -256,9 +266,10 @@ export default function MatchPageInner({
         });
       }
 
+      const depositHeaders = await withWalletAuth();
       await api(`/markets/${market.id}/deposit`, {
         method: "POST",
-        headers,
+        headers: depositHeaders,
         body: JSON.stringify({ outcome: selectedOutcome, amount, owner, txSignature }),
       });
       setNotice({
@@ -271,7 +282,7 @@ export default function MatchPageInner({
     } catch (cause) {
       setNotice({
         tone: "error",
-        text: friendlyStakeError(cause),
+        text: friendlyStakeError(cause, stakeLabel),
       });
     } finally {
       setBusy(false);

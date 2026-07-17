@@ -92,7 +92,7 @@ export function PredictionChart({ history, labels, omitKeys = [] }: Props) {
           <p className="section-kicker">Pool tape</p>
           <h2 id="pool-chart-title">Chance after each stake</h2>
           <p className="pool-chart-sub">
-            Step chart of this parimutuel pool — same idea as Kalshi/Polymarket probability tapes.
+            Step chart of this parimutuel pool — share % after each funded stake.
           </p>
         </div>
         <div className="chart-range" aria-label="Graph time range">

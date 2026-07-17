@@ -25,7 +25,7 @@ See [TECH.md](./TECH.md).
 
 ## Core idea
 
-Whistle is a World Cup fan prediction product: auto 1X2, O/U goals, first-scorer, corners, and tournament-winner pools; squads; live event tape; Poisson forecast kept separate from the crowd. Settlement waits on TxLINE finals + validation proofs; receipts expose seq / Merkle summary / daily roots PDA; unverified results refund. Solana USDC escrow + `validate_stat_v2` CPI hook are deployed on **devnet** (`WHISTLE_PROGRAM_ID=3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX`); playground can run the on-chain USDC rail via `docker-compose.onchain.yml`.
+Whistle is a World Cup fan prediction product: auto 1X2, O/U goals, first-scorer, corners, and tournament-winner pools; squads; live event tape; Poisson forecast kept separate from the crowd. Settlement waits on TxLINE finals + validation proofs; receipts expose seq / Merkle summary / daily roots PDA; unverified results refund. Solana USDC escrow + `validate_stat_v2` CPI hook are deployed on **devnet** (`WHISTLE_PROGRAM_ID=C2vCTGZDJYvcd8jdgvFF57FnfdDsUqQy7qogjP2SmDcU`); playground can run the on-chain USDC rail via `docker-compose.onchain.yml`.
 
 ## Demo video
 

@@ -1,5 +1,6 @@
 import {
   isFinalScoreRecord,
+  isKnockoutMatchResult,
   teamOutcomeSlug,
   type SettlementReceipt,
 } from "@whistle/shared";
@@ -22,6 +23,7 @@ let txlineCfg: TxlineConfig | null = null;
 let settleEnabled = true;
 let onchainEnabled = false;
 let network: "devnet" | "mainnet" = "devnet";
+let keeperPassInFlight = false;
 
 export function configureKeeper(
   cfg: TxlineConfig | null,
@@ -93,6 +95,44 @@ function isWorldCupFinal(fixtureId: string): boolean {
   );
 }
 
+/** Prefer waiting over voiding — temporary TxLINE/RPC gaps must not kill pools. */
+function pending(reason: string): SettlementAttempt {
+  getLogger()
+    .child({ module: "keeper" })
+    .info({ reason }, "settlement deferred until verification is complete");
+  return { status: "pending", reason };
+}
+
+function advancingSideFromRaw(
+  raw: unknown,
+  fixtureId: string
+): "home" | "away" | null {
+  if (!raw || typeof raw !== "object") return null;
+  const obj = raw as Record<string, unknown>;
+  const candidates = [
+    obj.AdvancingParticipantId,
+    obj.advancingParticipantId,
+    obj.WinnerParticipantId,
+    obj.winnerParticipantId,
+    obj.WinnerId,
+    obj.winnerId,
+  ];
+  const fixture = getState().fixtures[fixtureId];
+  if (!fixture) return null;
+  for (const candidate of candidates) {
+    const id = candidate == null ? "" : String(candidate);
+    if (!id) continue;
+    if (id === fixture.home.id) return "home";
+    if (id === fixture.away.id) return "away";
+  }
+  const side = String(
+    obj.AdvancingSide || obj.advancingSide || obj.WinnerSide || obj.winnerSide || ""
+  ).toLowerCase();
+  if (side === "home" || side === "1" || side === "participant1") return "home";
+  if (side === "away" || side === "2" || side === "participant2") return "away";
+  return null;
+}
+
 export async function maybeSettleFixture(
   fixtureId: string,
   homeScore: number,
@@ -110,21 +150,22 @@ export async function maybeSettleFixture(
     return { status: "noop" };
   }
 
-  const refundUnverified = async (reason: string): Promise<SettlementAttempt> => {
+  const fixture = getState().fixtures[fixtureId];
+  if (fixture?.status === "cancelled" || fixture?.status === "postponed") {
     const voided = await voidMarketsForFixtureWithRail(
       fixtureId,
-      reason,
+      `fixture ${fixture.status}`,
       onchainEnabled
     );
     log.warn(
-      { fixtureId, markets: voided.length, reason },
-      "unverified result refused; active stakes made refundable"
+      { fixtureId, markets: voided.length, status: fixture.status },
+      "fixture cancelled/postponed; stakes made refundable"
     );
-    return { status: "voided", reason };
-  };
+    return { status: "voided", reason: `fixture ${fixture.status}` };
+  }
 
   if (!txlineCfg?.apiToken) {
-    return await refundUnverified("TxLINE result verification unavailable");
+    return pending("TxLINE result verification unavailable");
   }
 
   let canonicalHome: number;
@@ -133,6 +174,7 @@ export async function maybeSettleFixture(
   let validation: unknown;
   let onchainProofVerified = false;
   let merkle: SettlementReceipt["merkle"] = {};
+  let advancingSide: "home" | "away" | null = null;
   try {
     const historical = await fetchHistoricalScores(txlineCfg, fixtureId);
     const finals = historical
@@ -152,14 +194,15 @@ export async function maybeSettleFixture(
     const finalSeq = final ? sequenceFrom(final.raw) : null;
     if (!final?.update || finalSeq === null) {
       log.warn({ fixtureId }, "TxLINE final record/sequence not available yet");
-      return await refundUnverified("TxLINE final record unavailable");
+      return pending("TxLINE final record unavailable");
     }
     seq = finalSeq;
+    advancingSide = advancingSideFromRaw(final.raw, fixtureId);
 
     validation = await fetchStatValidationV2(txlineCfg, fixtureId, seq, [1, 2]);
     if (!validationPresent(validation)) {
       log.warn({ fixtureId, seq }, "TxLINE validation payload empty");
-      return await refundUnverified("TxLINE validation unavailable");
+      return pending("TxLINE validation unavailable");
     }
 
     merkle = extractMerkleSummary(validation, network);
@@ -193,15 +236,47 @@ export async function maybeSettleFixture(
     }
   } catch (err) {
     log.warn({ err, fixtureId }, "TxLINE settlement verification failed");
-    return await refundUnverified("TxLINE validation unavailable");
+    return pending("TxLINE validation unavailable");
   }
 
   const settledIds: string[] = [];
   let settleTxSig: string | undefined;
   const firstTeam = firstScorerTeam(fixtureId);
   const corners = getState().matchStats[fixtureId]?.corners;
+  const knockout =
+    fixture != null ? isKnockoutMatchResult(fixture) : false;
+
+  if (knockout && canonicalHome === canonicalAway && !advancingSide) {
+    return pending(
+      "knockout level after regulation; waiting for advancing side (ET/pens)"
+    );
+  }
 
   for (const market of fixtureMarkets) {
+    if (
+      market.marketType === "total_corners" &&
+      (corners?.home == null || corners?.away == null)
+    ) {
+      log.warn(
+        { marketId: market.id, fixtureId },
+        "corner market deferred — box-score corners not available yet"
+      );
+      continue;
+    }
+    if (
+      market.marketType === "first_scorer" &&
+      (canonicalHome > 0 || canonicalAway > 0) &&
+      !firstTeam &&
+      canonicalHome > 0 &&
+      canonicalAway > 0
+    ) {
+      log.warn(
+        { marketId: market.id, fixtureId },
+        "first-scorer market deferred — both sides scored and event tape missing"
+      );
+      continue;
+    }
+
     const settled = await settleMarketVerified(
       market.id,
       canonicalHome,
@@ -211,6 +286,7 @@ export async function maybeSettleFixture(
         firstTeam,
         homeCorners: corners?.home,
         awayCorners: corners?.away,
+        advancingSide: advancingSide || undefined,
       }
     );
     if (settled.settleTxSig) settleTxSig = settled.settleTxSig;
@@ -226,6 +302,10 @@ export async function maybeSettleFixture(
       },
       "settled market from verified TxLINE final"
     );
+  }
+
+  if (!settledIds.length) {
+    return pending("no markets ready to settle yet");
   }
 
   if (isWorldCupFinal(fixtureId)) {
@@ -281,39 +361,59 @@ export async function maybeSettleFixture(
 }
 
 export async function runKeeperPass() {
-  const state = getState();
-  // Only touch fixtures that still have settleable markets. Sweeping every
-  // finished World Cup score against public Solana RPC rate-limits create_market
-  // / deposit prepare for live bettors.
-  const pendingFixtureIds = new Set<string>();
-  for (const market of Object.values(state.markets)) {
-    if (
-      (market.status === "open" || market.status === "locked") &&
-      market.marketType !== "tournament_winner"
-    ) {
-      pendingFixtureIds.add(market.fixtureId);
-    }
+  if (keeperPassInFlight) {
+    getLogger().warn("keeper pass skipped — previous pass still running");
+    return;
   }
-
-  for (const fixtureId of pendingFixtureIds) {
-    const live = state.live[fixtureId];
-    if (
-      live &&
-      (live.status === "finished" ||
-        isFinalScoreRecord({
-          action: live.action,
-          statusId: live.statusId,
-          period: live.period,
-        }))
-    ) {
-      await maybeSettleFixture(fixtureId, live.homeScore, live.awayScore);
-      continue;
+  keeperPassInFlight = true;
+  try {
+    const state = getState();
+    // Only touch fixtures that still have settleable markets. Sweeping every
+    // finished World Cup score against public Solana RPC rate-limits create_market
+    // / deposit prepare for live bettors.
+    const pendingFixtureIds = new Set<string>();
+    for (const market of Object.values(state.markets)) {
+      if (
+        (market.status === "open" || market.status === "locked") &&
+        market.marketType !== "tournament_winner"
+      ) {
+        pendingFixtureIds.add(market.fixtureId);
+      }
     }
 
-    const fixture = state.fixtures[fixtureId];
-    if (fixture?.status === "finished" && fixture.score) {
-      await maybeSettleFixture(fixtureId, fixture.score.home, fixture.score.away);
+    for (const fixtureId of pendingFixtureIds) {
+      const live = state.live[fixtureId];
+      if (
+        live &&
+        (live.status === "finished" ||
+          isFinalScoreRecord({
+            action: live.action,
+            statusId: live.statusId,
+            period: live.period,
+          }))
+      ) {
+        await maybeSettleFixture(fixtureId, live.homeScore, live.awayScore);
+        continue;
+      }
+
+      const fixture = state.fixtures[fixtureId];
+      if (
+        (fixture?.status === "finished" ||
+          fixture?.status === "cancelled" ||
+          fixture?.status === "postponed") &&
+        (fixture.score ||
+          fixture.status === "cancelled" ||
+          fixture.status === "postponed")
+      ) {
+        await maybeSettleFixture(
+          fixtureId,
+          fixture.score?.home ?? 0,
+          fixture.score?.away ?? 0
+        );
+      }
     }
+  } finally {
+    keeperPassInFlight = false;
   }
 }
 

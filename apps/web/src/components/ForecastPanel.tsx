@@ -11,15 +11,39 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import type { Fixture, MatchForecast, MatchResultOutcome } from "@whistle/shared";
+import {
+  isKnockoutMatchResult,
+  type Fixture,
+  type MatchForecast,
+  type MatchResultOutcome,
+} from "@whistle/shared";
 import styles from "./ForecastPanel.module.css";
 
-const OUTCOMES: MatchResultOutcome[] = ["home", "draw", "away"];
+const GROUP_OUTCOMES: MatchResultOutcome[] = ["home", "draw", "away"];
+const KNOCKOUT_OUTCOMES: MatchResultOutcome[] = ["home", "away"];
 
 function outcomeLabel(outcome: MatchResultOutcome, fixture: Fixture) {
   if (outcome === "home") return fixture.home.shortName || fixture.home.name;
   if (outcome === "away") return fixture.away.shortName || fixture.away.name;
   return "Draw";
+}
+
+function displayProbabilities(
+  forecast: MatchForecast,
+  outcomes: MatchResultOutcome[]
+): Record<MatchResultOutcome, number> {
+  const raw = forecast.model.probabilities;
+  const sum = outcomes.reduce((total, key) => total + (raw[key] || 0), 0);
+  if (sum <= 0) {
+    const even = 1 / outcomes.length;
+    return Object.fromEntries(outcomes.map((key) => [key, even])) as Record<
+      MatchResultOutcome,
+      number
+    >;
+  }
+  return Object.fromEntries(
+    outcomes.map((key) => [key, (raw[key] || 0) / sum])
+  ) as Record<MatchResultOutcome, number>;
 }
 
 function freshnessLabel(forecast: MatchForecast) {
@@ -52,19 +76,25 @@ export function ForecastPanel({
   fixture: Fixture;
 }) {
   const reducedMotion = useReducedMotion();
+  const knockout = isKnockoutMatchResult(fixture);
+  const outcomes = knockout ? KNOCKOUT_OUTCOMES : GROUP_OUTCOMES;
 
   const chartData = useMemo(() => {
     if (!forecast) return [];
-    return OUTCOMES.map((outcome) => ({
+    const model = displayProbabilities(forecast, outcomes);
+    const crowdRaw = forecast.crowd.probabilities;
+    const crowdSum =
+      crowdRaw && outcomes.reduce((total, key) => total + (crowdRaw[key] || 0), 0);
+    return outcomes.map((outcome) => ({
       outcome,
       name: outcomeLabel(outcome, fixture),
-      model: Number((forecast.model.probabilities[outcome] * 100).toFixed(1)),
+      model: Number((model[outcome] * 100).toFixed(1)),
       crowd:
-        forecast.crowd.available && forecast.crowd.probabilities
-          ? Number((forecast.crowd.probabilities[outcome] * 100).toFixed(1))
+        forecast.crowd.available && crowdRaw && crowdSum && crowdSum > 0
+          ? Number((((crowdRaw[outcome] || 0) / crowdSum) * 100).toFixed(1))
           : null,
     }));
-  }, [fixture, forecast]);
+  }, [fixture, forecast, outcomes]);
 
   if (!forecast) {
     return (
@@ -81,10 +111,13 @@ export function ForecastPanel({
     );
   }
 
-  const likely = forecast.model.likelyOutcome;
+  const modelProbs = displayProbabilities(forecast, outcomes);
+  const likely = (Object.entries(modelProbs) as Array<[MatchResultOutcome, number]>).sort(
+    (a, b) => b[1] - a[1]
+  )[0][0];
   const isFinal = forecast.model.phase === "final";
   const likelyLabel = outcomeLabel(likely, fixture);
-  const likelyProbability = forecast.model.probabilities[likely] * 100;
+  const likelyProbability = modelProbs[likely] * 100;
   const confidencePercent = Math.round(forecast.model.confidence.score * 100);
 
   return (
@@ -124,18 +157,26 @@ export function ForecastPanel({
         </div>
       </div>
 
-      <div className="forecast-probabilities" aria-label="Model probabilities">
-        {OUTCOMES.map((outcome) => (
+      <div
+        className={`forecast-probabilities${knockout ? " is-knockout" : ""}`}
+        aria-label="Model probabilities"
+      >
+        {outcomes.map((outcome) => (
           <div key={outcome} className={outcome === likely ? "is-likely" : ""}>
             <span>{outcomeLabel(outcome, fixture)}</span>
-            <strong>{(forecast.model.probabilities[outcome] * 100).toFixed(0)}%</strong>
+            <strong>{(modelProbs[outcome] * 100).toFixed(0)}%</strong>
             <i
               aria-hidden="true"
-              style={{ "--forecast-width": `${forecast.model.probabilities[outcome] * 100}%` } as CSSProperties}
+              style={{ "--forecast-width": `${modelProbs[outcome] * 100}%` } as CSSProperties}
             />
           </div>
         ))}
       </div>
+      {knockout && !isFinal && (
+        <p className="forecast-knockout-note">
+          Knockout model view — regulation draw mass is redistributed to the two advancers.
+        </p>
+      )}
 
       {!!forecast.model.factors?.length && !isFinal && (
         <div className="forecast-factors" aria-label="Forecast factor breakdown">
