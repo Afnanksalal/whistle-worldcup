@@ -434,6 +434,7 @@ h3,
 }
 
 .demo-wallet-fund {
+  position: relative;
   display: inline-flex;
   min-width: 0;
   align-items: center;
@@ -1970,7 +1971,31 @@ a.panel:hover {
   }
   .demo-wallet-fund-label-full { display: none; }
   .demo-wallet-fund-label-short { display: inline; }
-  .demo-wallet-fund-note { display: none; }
+  /* Keep faucet feedback visible on touch — title alone is not enough */
+  .demo-wallet-fund.has-note .demo-wallet-fund-note {
+    position: absolute;
+    top: calc(100% + 0.3rem);
+    right: 0;
+    z-index: 70;
+    display: block;
+    max-width: min(14rem, 72vw);
+    padding: 0.4rem 0.55rem;
+    overflow: visible;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-sm);
+    background: rgba(251, 252, 248, 0.96);
+    color: var(--forest-deep);
+    font-size: 0.62rem;
+    line-height: 1.35;
+    text-overflow: unset;
+    white-space: normal;
+    box-shadow: 0 8px 20px rgba(8, 29, 22, 0.12);
+  }
+  .site-header.is-home:not(.is-scrolled) .demo-wallet-fund.has-note .demo-wallet-fund-note {
+    border-color: rgba(251, 252, 248, 0.28);
+    background: rgba(6, 27, 20, 0.92);
+    color: rgba(251, 252, 248, 0.92);
+  }
   .home-hero { min-height: auto; }
   .home-hero-grid {
     min-height: auto;

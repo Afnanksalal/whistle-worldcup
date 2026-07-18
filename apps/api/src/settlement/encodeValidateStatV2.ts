@@ -192,8 +192,30 @@ export function buildValidateStatV2IxData(
     throw new Error("validation needs statProofs for home/away");
   }
 
-  const leaves = statsToProve.slice(0, 2).map((statRaw, index) => {
+  // TxLINE soccer finals: key 1 = home goals, key 2 = away goals.
+  // Never trust array order alone — unrelated stats with matching values must not settle.
+  const HOME_GOAL_KEY = 1;
+  const AWAY_GOAL_KEY = 2;
+  const homeIndex = statsToProve.findIndex((statRaw) => {
     const stat = asRecord(statRaw);
+    return Boolean(stat && Number(stat.key) === HOME_GOAL_KEY);
+  });
+  const awayIndex = statsToProve.findIndex((statRaw) => {
+    const stat = asRecord(statRaw);
+    return Boolean(stat && Number(stat.key) === AWAY_GOAL_KEY);
+  });
+  if (homeIndex < 0 || awayIndex < 0) {
+    throw new Error("validation missing home/away goal stats (keys 1 and 2)");
+  }
+  if (homeIndex >= statProofs.length || awayIndex >= statProofs.length) {
+    throw new Error("validation statProofs do not cover home/away goal stats");
+  }
+
+  const leaves = [
+    { index: homeIndex, expected: scores.homeScore, requiredKey: HOME_GOAL_KEY },
+    { index: awayIndex, expected: scores.awayScore, requiredKey: AWAY_GOAL_KEY },
+  ].map(({ index, expected, requiredKey }) => {
+    const stat = asRecord(statsToProve[index]);
     if (!stat) throw new Error("invalid stat leaf");
     const key = Number(stat.key);
     const value = Number(stat.value);
@@ -201,10 +223,12 @@ export function buildValidateStatV2IxData(
     if (![key, value, period].every(Number.isFinite)) {
       throw new Error("stat leaf fields incomplete");
     }
-    const expected = index === 0 ? scores.homeScore : scores.awayScore;
+    if (key !== requiredKey) {
+      throw new Error(`proven stat key ${key} is not goal key ${requiredKey}`);
+    }
     if (value !== expected) {
       throw new Error(
-        `proven stat[${index}] value ${value} does not match settle score ${expected}`
+        `proven goal stat key ${key} value ${value} does not match settle score ${expected}`
       );
     }
     return {
@@ -247,9 +271,20 @@ export function validationHasEncodableProof(validation: unknown): boolean {
   try {
     const root = asRecord(validation);
     if (!root) return false;
-    const stats = root.statsToProve ?? root.stats_to_prove;
+    const stats = root.statsToProve ?? root.stats_to_prove ?? root.stats;
     const proofs = root.statProofs ?? root.stat_proofs;
-    return Array.isArray(stats) && stats.length >= 2 && Array.isArray(proofs) && proofs.length >= 2;
+    if (!Array.isArray(stats) || stats.length < 2 || !Array.isArray(proofs) || proofs.length < 2) {
+      return false;
+    }
+    const keys = new Set(
+      stats
+        .map((statRaw) => {
+          const stat = asRecord(statRaw);
+          return stat ? Number(stat.key) : NaN;
+        })
+        .filter((key) => Number.isFinite(key))
+    );
+    return keys.has(1) && keys.has(2);
   } catch {
     return false;
   }
