@@ -17,7 +17,7 @@ World Cup fans want to stake with friends and get paid at full-time. Sportsbooks
 - **Tournament** (`/groups`) + **News** (`/news`)
 - **Open a knockout** — show **To advance** (no Draw); forecast redistributes regulation-draw mass; stake goals / first scorer / corners separately
 - **Live tape** — score pulse + TxLINE event feed during a live match (or show finished match events)
-- **Connect wallet** — header shows **Solana Devnet**. Prefer **Whistle Demo** + **Get demo USDC**, or on phones **Phantom / Solflare (mobile)** / **Phantom** (opens the app on Devnet) → stake USDC on-chain
+- **Connect wallet** — header shows **Solana Devnet**. Prefer **Whistle Demo** + **Get demo USDC**, or on phones open **Phantom / Solflare / Backpack** (each deep-links into that app) or **Any installed wallet (mobile)** → stake USDC on-chain
 - **Positions** (`/positions`) — active / claimable
 - **Settlement receipt** — on a finished match show seq, Merkle summary, PDA, proof detail
 - **Squads** — create / join invite

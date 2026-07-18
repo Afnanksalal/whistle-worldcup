@@ -6,35 +6,24 @@ import {
   SolanaMobileWalletAdapter,
 } from "@solana-mobile/wallet-adapter-mobile";
 import { normalizeSolanaNetwork, type SolanaCluster } from "./solana-cluster";
+import { launchWalletDeepLink } from "./wallet-deeplinks";
 
 export function isMobileWebBrowser(userAgent = globalThis.navigator?.userAgent ?? ""): boolean {
   return /Android|iPhone|iPad|iPod|Mobile/i.test(userAgent);
 }
 
-export function isPhantomInjected(): boolean {
-  if (typeof window === "undefined") return false;
-  const phantom = (window as Window & {
-    phantom?: { solana?: { isPhantom?: boolean } };
-    solana?: { isPhantom?: boolean };
-  }).phantom?.solana;
-  const solana = (window as Window & { solana?: { isPhantom?: boolean } }).solana;
-  return Boolean(phantom?.isPhantom || solana?.isPhantom);
-}
-
-/** Open current page inside Phantom's in-app browser (works on Android + iOS). */
+/** @deprecated Prefer launchWalletDeepLink("Phantom") */
 export function openPhantomBrowse(href = globalThis.location?.href): void {
-  if (typeof window === "undefined" || !href) return;
-  const url = encodeURIComponent(href);
-  const ref = encodeURIComponent(window.location.origin);
-  window.location.assign(`https://phantom.app/ul/browse/${url}?ref=${ref}`);
+  launchWalletDeepLink("Phantom", { href });
 }
 
-/** Open current page inside Solflare's in-app browser. */
+/** @deprecated Prefer launchWalletDeepLink("Solflare") */
 export function openSolflareBrowse(href = globalThis.location?.href): void {
-  if (typeof window === "undefined" || !href) return;
-  const url = encodeURIComponent(href);
-  const ref = encodeURIComponent(window.location.origin);
-  window.location.assign(`https://solflare.com/ul/v1/browse/${url}?ref=${ref}`);
+  launchWalletDeepLink("Solflare", { href });
+}
+
+export function openBackpackBrowse(href = globalThis.location?.href): void {
+  launchWalletDeepLink("Backpack", { href });
 }
 
 export function mobileWalletCluster(network: string | null | undefined): SolanaCluster {

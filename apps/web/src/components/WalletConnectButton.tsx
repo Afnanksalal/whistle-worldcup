@@ -7,10 +7,12 @@ import { SolanaMobileWalletAdapterWalletName } from "@solana-mobile/wallet-adapt
 import { clusterLabel, normalizeSolanaNetwork } from "../lib/solana-cluster";
 import { useRuntime } from "../lib/runtime";
 import {
-  isMobileWebBrowser,
-  openPhantomBrowse,
-  openSolflareBrowse,
-} from "../lib/wallet-mobile";
+  isMobileWalletAdapterName,
+  launchWalletDeepLink,
+  rememberWalletLaunch,
+  shouldDeepLinkWallet,
+} from "../lib/wallet-deeplinks";
+import { isMobileWebBrowser } from "../lib/wallet-mobile";
 
 function shortAddress(address: string) {
   return `${address.slice(0, 4)}…${address.slice(-4)}`;
@@ -18,24 +20,22 @@ function shortAddress(address: string) {
 
 function walletBlurb(name: string, readyState: WalletReadyState, mobile: boolean): string {
   if (name === "Whistle Demo") return "Instant playground wallet — no app install";
-  if (name === SolanaMobileWalletAdapterWalletName) {
-    return "Opens Phantom or Solflare on this phone (Devnet)";
+  if (isMobileWalletAdapterName(name)) {
+    return "System sheet — pick any installed Solana wallet (Devnet)";
   }
-  if (name === "Phantom") {
-    if (mobile && readyState !== WalletReadyState.Installed) {
-      return "Opens this site inside the Phantom app";
+  if (readyState === WalletReadyState.Installed) {
+    return "Detected in this browser";
+  }
+  if (mobile) {
+    if (name === "Phantom" || name === "Solflare" || name === "Backpack") {
+      return `Opens this site inside the ${name} app`;
     }
-    return readyState === WalletReadyState.Installed
-      ? "Browser extension detected"
-      : "Install Phantom or open in the Phantom app";
+    return "Opens the wallet app or install page";
   }
-  if (name === "Solflare") {
-    if (mobile && readyState !== WalletReadyState.Installed) {
-      return "Opens this site inside the Solflare app";
-    }
-    return "Solflare wallet";
+  if (name === "Phantom" || name === "Solflare" || name === "Backpack") {
+    return `Install ${name} or open it on mobile`;
   }
-  return readyState === WalletReadyState.Installed ? "Detected" : "Available";
+  return readyState === WalletReadyState.Loadable ? "Available" : "Not detected";
 }
 
 export function WalletConnectButton() {
@@ -76,6 +76,7 @@ export function WalletConnectButton() {
       if (name === SolanaMobileWalletAdapterWalletName) return 1;
       if (name === "Phantom") return 2;
       if (name === "Solflare") return 3;
+      if (name === "Backpack") return 4;
       return 10;
     };
     return [...wallets].sort((a, b) => rank(a.adapter.name) - rank(b.adapter.name));
@@ -86,29 +87,28 @@ export function WalletConnectButton() {
       const entry = wallets.find((item) => item.adapter.name === name);
       if (!entry) return;
 
-      // Mobile browsers without an injected provider: open the wallet in-app browser.
-      // Persist selection first so autoConnect resumes after returning from the app.
-      if (name === "Phantom" && entry.readyState !== WalletReadyState.Installed) {
-        if (mobile || entry.readyState === WalletReadyState.Loadable) {
-          select(name);
-          openPhantomBrowse();
-          setOpen(false);
-          return;
+      rememberWalletLaunch(name);
+
+      if (
+        shouldDeepLinkWallet({
+          name,
+          readyState: entry.readyState,
+          mobile,
+        })
+      ) {
+        select(name);
+        const launched = launchWalletDeepLink(name, {
+          preferInstall: !mobile && entry.readyState === WalletReadyState.NotDetected,
+        });
+        // Unknown wallet on mobile: fall back to adapter homepage.
+        if (!launched && entry.adapter.url) {
+          window.open(entry.adapter.url, "_blank", "noopener,noreferrer");
         }
-        select(name);
-        window.open("https://phantom.app/", "_blank", "noopener,noreferrer");
         setOpen(false);
         return;
       }
 
-      if (name === "Solflare" && mobile && entry.readyState !== WalletReadyState.Installed) {
-        select(name);
-        openSolflareBrowse();
-        setOpen(false);
-        return;
-      }
-
-      // select() + autoConnect connects on the next render.
+      // Installed / Demo / MWA: select() + autoConnect on the next render.
       select(name);
       setOpen(false);
     },
@@ -208,16 +208,15 @@ export function WalletConnectButton() {
               Playground stakes on <strong>Solana {networkName}</strong>
               {isDevnet ? " (free test SOL/USDC)." : "."}
               {mobile
-                ? " On phones, tap Phantom / Solflare (mobile) or Phantom to open your app."
-                : " Prefer Whistle Demo for the fastest path."}
+                ? " Tap a wallet to open its app (Phantom, Solflare, Backpack) or use Mobile Wallet Adapter for any installed wallet."
+                : " Prefer Whistle Demo for the fastest path. Mobile wallets deep-link when opened on a phone."}
             </p>
             <ul className="wallet-connect-list">
               {ordered.map((entry) => {
                 const name = entry.adapter.name;
-                const label =
-                  name === SolanaMobileWalletAdapterWalletName
-                    ? "Phantom / Solflare (mobile)"
-                    : name;
+                const label = isMobileWalletAdapterName(name)
+                  ? "Any installed wallet (mobile)"
+                  : name;
                 return (
                   <li key={name}>
                     <button
