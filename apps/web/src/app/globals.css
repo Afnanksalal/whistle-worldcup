@@ -371,6 +371,10 @@ h3,
   box-shadow: 0 0 0 3px rgba(59, 130, 160, 0.14);
 }
 
+.network-status-label-short {
+  display: none;
+}
+
 .site-header.is-home:not(.is-scrolled) .data-status {
   border-color: rgba(251, 252, 248, 0.26);
   background: rgba(6, 27, 20, 0.24);
@@ -1958,6 +1962,12 @@ a.panel:hover {
     max-width: none;
     gap: 0.45rem;
   }
+  .network-status-label-full { display: none; }
+  .network-status-label-short { display: inline; }
+  .data-status.network-status {
+    gap: 0.35rem;
+    padding-inline: 0.5rem;
+  }
   .demo-wallet-fund-label-full { display: none; }
   .demo-wallet-fund-label-short { display: inline; }
   .demo-wallet-fund-note { display: none; }
@@ -2169,6 +2179,10 @@ a.panel:hover {
 
 @media (max-width: 430px) {
   .nav-shell { width: calc(100% - 1rem); }
+  .data-status.network-status {
+    padding: 0.38rem 0.55rem;
+    font-size: 0.62rem;
+  }
   .demo-wallet-fund-btn {
     min-height: 2.4rem !important;
     padding-inline: 0.5rem !important;
@@ -2178,6 +2192,10 @@ a.panel:hover {
     max-width: 6.4rem !important;
     padding-inline: 0.5rem !important;
     font-size: 0.64rem !important;
+  }
+  .wallet-connect-trigger {
+    gap: 0.4rem !important;
+    padding-inline: 0.5rem 0.65rem !important;
   }
   .hero-actions { align-items: flex-start; flex-direction: column; }
   .featured-kickoff { display: grid; }
@@ -2718,6 +2736,7 @@ a.panel:hover {
 
 .bet-confirm {
   width: 100%;
+  scroll-margin-bottom: 6.5rem;
 }
 
 .bet-notice {

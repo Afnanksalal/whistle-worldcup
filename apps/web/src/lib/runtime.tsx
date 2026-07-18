@@ -27,6 +27,8 @@ export type AppMeta = {
   demoWalletEnabled?: boolean;
 };
 
+const META_CACHE_KEY = "whistle.runtime.meta";
+
 const defaultMeta: AppMeta = {
   mode: "live",
   network: "devnet",
@@ -41,6 +43,32 @@ const defaultMeta: AppMeta = {
   keepSettleEnabled: true,
   demoWalletEnabled: false,
 };
+
+function readCachedMeta(): AppMeta | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = sessionStorage.getItem(META_CACHE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<AppMeta>;
+    if (parsed.stakeAsset !== "USDC" && parsed.stakeAsset !== "units") return null;
+    return { ...defaultMeta, ...parsed };
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedMeta(meta: AppMeta) {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.setItem(META_CACHE_KEY, JSON.stringify(meta));
+  } catch {
+    // ignore quota / private mode
+  }
+}
+
+function stakeLabelFor(meta: AppMeta): string {
+  return meta.stakeAsset === "USDC" ? "USDC" : "units";
+}
 
 type Ctx = {
   meta: AppMeta;
@@ -60,10 +88,19 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const [meta, setMeta] = useState<AppMeta>(defaultMeta);
   const [loading, setLoading] = useState(true);
 
+  useEffect(() => {
+    const cached = readCachedMeta();
+    if (cached) {
+      setMeta(cached);
+      setLoading(false);
+    }
+  }, []);
+
   const refresh = useCallback(async () => {
     try {
       const m = await api<AppMeta>("/meta");
       setMeta(m);
+      writeCachedMeta(m);
     } catch {
       // keep last known
     } finally {
@@ -82,7 +119,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
       meta,
       loading,
       refresh,
-      stakeLabel: meta.stakeAsset === "USDC" ? "USDC" : "units",
+      stakeLabel: stakeLabelFor(meta),
     }),
     [meta, loading, refresh]
   );
