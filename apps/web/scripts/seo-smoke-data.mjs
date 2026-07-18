@@ -5,7 +5,7 @@ export const SEO_AWAY_TEAM = "Spain";
 export const SEO_ARTICLE_TITLE = "SEO Smoke: France and Spain prepare for kickoff";
 
 /** Keep kickoff in the future so home "Next" SSR always includes this fixture. */
-export function seoFixtureKickoffTs(now = Date.now()): number {
+export function seoFixtureKickoffTs(now = Date.now()) {
   return now + 3 * 24 * 60 * 60 * 1000;
 }
 
