@@ -2,13 +2,13 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useEffect, useState, type CSSProperties } from "react";
 import { NAV_LINKS, type NavIcon } from "../lib/nav";
 import { clusterLabel, normalizeSolanaNetwork } from "../lib/solana-cluster";
 import { useRuntime } from "../lib/runtime";
 import { BrandMark } from "./BrandMark";
 import { DemoWalletFund } from "./DemoWalletFund";
+import { WalletConnectButton } from "./WalletConnectButton";
 
 function NavGlyph({ name }: { name: NavIcon }) {
   return (
@@ -73,28 +73,6 @@ function isActive(pathname: string, href: string) {
   return href === "/"
     ? pathname === "/"
     : pathname === href || pathname.startsWith(`${href}/`);
-}
-
-function MountedWalletButton() {
-  const [mounted, setMounted] = useState(false);
-
-  useEffect(() => setMounted(true), []);
-
-  if (!mounted) {
-    return (
-      <button
-        className="wallet-adapter-button wallet-adapter-button-trigger"
-        type="button"
-        aria-busy="true"
-        aria-label="Wallet controls loading"
-        disabled
-      >
-        Select Wallet
-      </button>
-    );
-  }
-
-  return <WalletMultiButton />;
 }
 
 export function Nav() {
@@ -172,7 +150,7 @@ export function Nav() {
                   : "Schedule preview"}
             </span>
             <DemoWalletFund />
-            <MountedWalletButton />
+            <WalletConnectButton />
           </div>
         </div>
       </header>

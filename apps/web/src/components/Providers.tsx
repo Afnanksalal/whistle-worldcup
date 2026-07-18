@@ -1,18 +1,27 @@
 "use client";
 
 import { useCallback, useMemo, type ReactNode } from "react";
-import type { Adapter, WalletError } from "@solana/wallet-adapter-base";
+import {
+  WalletNotReadyError,
+  type Adapter,
+  type WalletError,
+} from "@solana/wallet-adapter-base";
 import {
   ConnectionProvider,
   WalletProvider,
 } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
-import { PhantomWalletAdapter } from "@solana/wallet-adapter-phantom";
 import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
 import { DemoWalletAdapter } from "../lib/demo-wallet";
 import { IdentityProvider } from "../lib/identity";
+import { PhantomBrowseWalletAdapter } from "../lib/phantom-browse-adapter";
 import { RuntimeProvider, useRuntime } from "../lib/runtime";
 import { solanaRpcEndpoint, walletAdapterNetwork } from "../lib/solana-cluster";
+import {
+  createDevnetMobileWalletAdapter,
+  isMobileWebBrowser,
+  openPhantomBrowse,
+} from "../lib/wallet-mobile";
 
 function WalletProviders({ children }: { children: ReactNode }) {
   const { meta } = useRuntime();
@@ -22,18 +31,33 @@ function WalletProviders({ children }: { children: ReactNode }) {
   );
   const wallets = useMemo(() => {
     const network = walletAdapterNetwork(meta.network);
-    // Solflare uses `network` for signAndSendTransaction cluster selection.
-    const list: Adapter[] = [
-      new PhantomWalletAdapter(),
-      new SolflareWalletAdapter({ network }),
-    ];
-    if (meta.demoWalletEnabled) list.unshift(new DemoWalletAdapter());
+    const list: Adapter[] = [];
+
+    if (meta.demoWalletEnabled) {
+      list.push(new DemoWalletAdapter());
+    }
+
+    // Pin MWA cluster to API network (Devnet) — do not infer mainnet from RPC host quirks.
+    const mobile = createDevnetMobileWalletAdapter(meta.network);
+    if (mobile) list.push(mobile);
+
+    list.push(new PhantomBrowseWalletAdapter());
+    list.push(new SolflareWalletAdapter({ network }));
     return list;
   }, [meta.demoWalletEnabled, meta.network]);
+
   const onWalletError = useCallback((error: WalletError) => {
-    if (process.env.NODE_ENV !== "production") {
-      console.warn("Wallet connection error", error);
+    console.warn("Wallet connection error", error);
+    if (!(error instanceof WalletNotReadyError)) return;
+    if (isMobileWebBrowser()) {
+      openPhantomBrowse();
+      return;
     }
+    // Desktop: send users to the wallet homepage instead of a no-op.
+    const target = /solflare/i.test(error.message || "")
+      ? "https://solflare.com/"
+      : "https://phantom.app/";
+    window.open(target, "_blank", "noopener,noreferrer");
   }, []);
 
   return (
