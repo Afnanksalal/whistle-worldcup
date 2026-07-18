@@ -13,6 +13,12 @@ import {
   type MarketOutcome,
   type MarketType,
 } from "@whistle/shared";
+import { useRuntime } from "./runtime";
+import {
+  clusterLabel,
+  expectedGenesisHash,
+  normalizeSolanaNetwork,
+} from "./solana-cluster";
 
 const TOKEN_PROGRAM_ID = new PublicKey(
   "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA"
@@ -80,19 +86,52 @@ export function deriveUserATA(user: PublicKey, mint: PublicKey): PublicKey {
 
 export function useSolanaTransactions() {
   const { connection } = useConnection();
-  const { publicKey, sendTransaction } = useWallet();
+  const { publicKey, signTransaction } = useWallet();
+  const { meta } = useRuntime();
+
+  const assertCluster = useCallback(async () => {
+    const expected = expectedGenesisHash(meta.network);
+    const label = clusterLabel(meta.network);
+    let genesis: string;
+    try {
+      genesis = await connection.getGenesisHash();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      throw new Error(`Could not reach Solana ${label} RPC: ${message}`);
+    }
+    if (genesis !== expected) {
+      throw new Error(
+        `Wrong Solana cluster. Whistle is on ${label}, but this connection is elsewhere. Switch your wallet/app RPC to Solana ${label} and try again.`
+      );
+    }
+  }, [connection, meta.network]);
 
   const send = useCallback(
     async (instruction: TransactionInstruction): Promise<string> => {
       if (!publicKey) throw new Error("Wallet not connected");
-      const transaction = new Transaction().add(instruction);
+      if (!signTransaction) {
+        throw new Error(
+          "This wallet cannot sign transactions in the browser. Use Whistle Demo or another Solana wallet."
+        );
+      }
+
+      await assertCluster();
+
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(
         "confirmed"
       );
-      transaction.recentBlockhash = blockhash;
-      transaction.feePayer = publicKey;
-      const signature = await sendTransaction(transaction, connection, {
+      const transaction = new Transaction({
+        feePayer: publicKey,
+        recentBlockhash: blockhash,
+      }).add(instruction);
+
+      // Sign in-wallet, then broadcast on OUR Connection (devnet).
+      // Wallet signAndSendTransaction often posts to the wallet's selected
+      // cluster (mainnet), which breaks playground staking.
+      const signed = await signTransaction(transaction);
+      const signature = await connection.sendRawTransaction(signed.serialize(), {
         preflightCommitment: "confirmed",
+        skipPreflight: false,
       });
       await connection.confirmTransaction(
         { signature, blockhash, lastValidBlockHeight },
@@ -100,7 +139,7 @@ export function useSolanaTransactions() {
       );
       return signature;
     },
-    [connection, publicKey, sendTransaction]
+    [assertCluster, connection, publicKey, signTransaction]
   );
 
   const deposit = useCallback(
@@ -115,6 +154,9 @@ export function useSolanaTransactions() {
       amount: number;
     }): Promise<string> => {
       if (!publicKey) throw new Error("Wallet not connected");
+      if (normalizeSolanaNetwork(meta.network) === "mainnet-beta" && meta.demoWalletEnabled) {
+        throw new Error("Demo staking is disabled on mainnet.");
+      }
       const programId = new PublicKey(args.programId);
       const mint = new PublicKey(args.usdcMint);
       const market = deriveMarketPDA(
@@ -150,7 +192,7 @@ export function useSolanaTransactions() {
         })
       );
     },
-    [publicKey, send]
+    [meta.demoWalletEnabled, meta.network, publicKey, send]
   );
 
   const claim = useCallback(

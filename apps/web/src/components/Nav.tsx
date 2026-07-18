@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { WalletMultiButton } from "@solana/wallet-adapter-react-ui";
 import { useEffect, useState, type CSSProperties } from "react";
 import { NAV_LINKS, type NavIcon } from "../lib/nav";
+import { clusterLabel, normalizeSolanaNetwork } from "../lib/solana-cluster";
 import { useRuntime } from "../lib/runtime";
 import { BrandMark } from "./BrandMark";
 import { DemoWalletFund } from "./DemoWalletFund";
@@ -100,6 +101,8 @@ export function Nav() {
   const pathname = usePathname();
   const { meta } = useRuntime();
   const dataIsLive = meta.fixtureSource === "txline" || meta.txlineConfigured;
+  const networkName = clusterLabel(meta.network);
+  const isDevnet = normalizeSolanaNetwork(meta.network) === "devnet";
   const isHome = pathname === "/";
   const [hasScrolled, setHasScrolled] = useState(false);
 
@@ -153,6 +156,13 @@ export function Nav() {
           </div>
 
           <div className="nav-actions">
+            <span
+              className={`data-status network-status${isDevnet ? " is-devnet" : ""}`}
+              title={`Solana ${networkName} — stakes settle on this cluster`}
+            >
+              <span className="data-status-dot" aria-hidden />
+              Solana {networkName}
+            </span>
             <span className={`data-status${dataIsLive ? " is-live" : " is-preview"}`}>
               <span className="data-status-dot" aria-hidden />
               {meta.fixtureSource === "txline"
