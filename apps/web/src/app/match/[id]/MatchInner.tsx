@@ -58,8 +58,12 @@ function friendlyStakeError(cause: unknown, stakeLabel = "units"): string {
   ) {
     return "This wallet already has a pick on the other side of this market. Add to the same outcome, or use another wallet.";
   }
-  if (/Wrong Solana cluster|elsewhere|Switch your wallet/i.test(message)) {
-    return "Wrong Solana network. Switch your wallet to Devnet (not Mainnet), then retry. Or use Whistle Demo + Get demo USDC.";
+  if (
+    /Wrong Solana cluster|elsewhere|Switch your wallet|Blockhash rejected|blockhash.*(invalid|not found|expired)/i.test(
+      message
+    )
+  ) {
+    return "Wrong Solana network in your wallet. Brave/Phantom must use Solana Devnet (not Mainnet, not Ethereum). Switch network, or use Whistle Demo + Get demo USDC.";
   }
   if (
     /User rejected|rejected the request|cancelled|canceled|Approval Denied/i.test(message)

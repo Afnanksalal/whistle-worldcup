@@ -18,13 +18,22 @@ function shortAddress(address: string) {
   return `${address.slice(0, 4)}…${address.slice(-4)}`;
 }
 
+function isBraveWalletName(name: string): boolean {
+  return /brave/i.test(name);
+}
+
 function walletBlurb(name: string, readyState: WalletReadyState, mobile: boolean): string {
   if (name === "Whistle Demo") return "Instant playground wallet — no app install";
   if (isMobileWalletAdapterName(name)) {
     return "System sheet — pick any installed Solana wallet (Devnet)";
   }
+  if (isBraveWalletName(name)) {
+    return readyState === WalletReadyState.Installed
+      ? "Solana account only — set Brave network to Devnet (not Ethereum)"
+      : "Brave Solana wallet — switch to Devnet before staking";
+  }
   if (readyState === WalletReadyState.Installed) {
-    return "Detected in this browser";
+    return "Detected — use Solana Devnet in wallet settings";
   }
   if (mobile) {
     if (name === "Phantom" || name === "Solflare" || name === "Backpack") {
@@ -70,6 +79,18 @@ export function WalletConnectButton() {
     return () => window.removeEventListener("keydown", onKey);
   }, [menuOpen, open]);
 
+  // Lock background scroll so the wallet list can pan on mobile browsers (Brave/iOS).
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.classList.add("wallet-modal-open");
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.body.classList.remove("wallet-modal-open");
+      document.body.style.overflow = previous;
+    };
+  }, [open]);
+
   const ordered = useMemo(() => {
     const rank = (name: string) => {
       if (name === "Whistle Demo") return 0;
@@ -77,6 +98,7 @@ export function WalletConnectButton() {
       if (name === "Phantom") return 2;
       if (name === "Solflare") return 3;
       if (name === "Backpack") return 4;
+      if (isBraveWalletName(name)) return 5;
       return 10;
     };
     return [...wallets].sort((a, b) => rank(a.adapter.name) - rank(b.adapter.name));
@@ -208,10 +230,10 @@ export function WalletConnectButton() {
               Playground stakes on <strong>Solana {networkName}</strong>
               {isDevnet ? " (free test SOL/USDC)." : "."}
               {mobile
-                ? " Tap a wallet to open its app (Phantom, Solflare, Backpack) or use Mobile Wallet Adapter for any installed wallet."
-                : " Prefer Whistle Demo for the fastest path. Mobile wallets deep-link when opened on a phone."}
+                ? " Scroll for every wallet. Phantom/Solflare/Backpack open their apps; Brave must be on Solana Devnet (not Ethereum)."
+                : " Prefer Whistle Demo for the fastest path. Brave users: select the Solana account on Devnet."}
             </p>
-            <ul className="wallet-connect-list">
+            <ul className="wallet-connect-list" data-wallet-scroll="true">
               {ordered.map((entry) => {
                 const name = entry.adapter.name;
                 const label = isMobileWalletAdapterName(name)

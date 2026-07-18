@@ -116,30 +116,56 @@ export function useSolanaTransactions() {
       }
 
       await assertCluster();
+      const label = clusterLabel(meta.network);
 
-      const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(
-        "confirmed"
-      );
-      const transaction = new Transaction({
-        feePayer: publicKey,
-        recentBlockhash: blockhash,
-      }).add(instruction);
+      // Fresh blockhash immediately before sign — Brave/Phantom reject stale hashes,
+      // and wallets on Mainnet reject Devnet hashes as "Blockhash is invalid".
+      const signAndSend = async () => {
+        const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(
+          "confirmed"
+        );
+        const transaction = new Transaction({
+          feePayer: publicKey,
+          recentBlockhash: blockhash,
+        }).add(instruction);
 
-      // Sign in-wallet, then broadcast on OUR Connection (devnet).
-      // Wallet signAndSendTransaction often posts to the wallet's selected
-      // cluster (mainnet), which breaks playground staking.
-      const signed = await signTransaction(transaction);
-      const signature = await connection.sendRawTransaction(signed.serialize(), {
-        preflightCommitment: "confirmed",
-        skipPreflight: false,
-      });
-      await connection.confirmTransaction(
-        { signature, blockhash, lastValidBlockHeight },
-        "confirmed"
-      );
-      return signature;
+        // Sign in-wallet, then broadcast on OUR Connection (devnet).
+        const signed = await signTransaction(transaction);
+        const signature = await connection.sendRawTransaction(signed.serialize(), {
+          preflightCommitment: "confirmed",
+          skipPreflight: false,
+          maxRetries: 3,
+        });
+        await connection.confirmTransaction(
+          { signature, blockhash, lastValidBlockHeight },
+          "confirmed"
+        );
+        return signature;
+      };
+
+      try {
+        return await signAndSend();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error || "");
+        if (/blockhash.*(invalid|not found|expired)|expired.*blockhash/i.test(message)) {
+          // One retry with a brand-new hash (covers expiry during the approve prompt).
+          try {
+            return await signAndSend();
+          } catch (retryError) {
+            const retryMessage =
+              retryError instanceof Error ? retryError.message : String(retryError || "");
+            if (/blockhash.*(invalid|not found|expired)|expired.*blockhash/i.test(retryMessage)) {
+              throw new Error(
+                `Blockhash rejected — your wallet is probably not on Solana ${label}. In Brave/Phantom/Solflare switch the Solana network to ${label} (not Mainnet / not Ethereum), then retry. Or use Whistle Demo + Get demo USDC.`
+              );
+            }
+            throw retryError;
+          }
+        }
+        throw error;
+      }
     },
-    [assertCluster, connection, publicKey, signTransaction]
+    [assertCluster, connection, meta.network, publicKey, signTransaction]
   );
 
   const deposit = useCallback(
