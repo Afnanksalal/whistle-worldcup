@@ -156,16 +156,20 @@ export function WalletConnectButton() {
       <div className="wallet-connect">
         <button
           type="button"
-          className="wallet-adapter-button wallet-adapter-button-trigger"
+          className="wallet-adapter-button wallet-adapter-button-trigger wallet-connect-trigger"
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((value) => !value)}
         >
           {wallet?.adapter.icon ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={wallet.adapter.icon} alt="" width={24} height={24} />
+            <span className="wallet-adapter-button-start-icon wallet-connect-trigger-icon">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img src={wallet.adapter.icon} alt="" width={20} height={20} />
+            </span>
           ) : null}
-          {shortAddress(publicKey.toBase58())}
+          <span className="wallet-connect-trigger-label">
+            {shortAddress(publicKey.toBase58())}
+          </span>
         </button>
         {menuOpen && (
           <div className="wallet-connect-menu" role="menu">

@@ -491,6 +491,39 @@ h3,
   align-items: center;
 }
 
+.wallet-connect-trigger {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 0.55rem !important;
+  padding-inline: 0.7rem 0.85rem !important;
+}
+
+.wallet-connect-trigger-icon {
+  display: inline-flex !important;
+  flex: none;
+  width: 1.35rem !important;
+  height: 1.35rem !important;
+  margin: 0 !important;
+  align-items: center;
+  justify-content: center;
+  border-radius: 0.35rem;
+  overflow: hidden;
+}
+
+.wallet-connect-trigger-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wallet-connect-trigger-label {
+  display: inline-block;
+  min-width: 0;
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+
 .wallet-connect-menu {
   position: absolute;
   top: calc(100% + 0.4rem);
