@@ -15,11 +15,15 @@ import { getAssociatedTokenAddressSync } from "@solana/spl-token";
 import {
   amountToBaseUnits,
   marketIdentitySeed,
+  TXLINE_DEVNET,
+  TXLINE_MAINNET,
   type MarketPool,
   type MarketType,
 } from "@whistle/shared";
 import type { AppConfig } from "../config";
 import type { AppState } from "../store";
+import { deriveDailyScoresPda, extractMerkleSummary } from "./merkle";
+import { buildValidateStatV2IxData } from "./encodeValidateStatV2";
 
 const anchorDiscriminator = (namespace: "global" | "account", name: string): Buffer =>
   createHash("sha256").update(`${namespace}:${name}`).digest().subarray(0, 8);
@@ -384,10 +388,18 @@ export async function ensureMarketOnchain(
   return { marketPda: marketPda.toBase58(), created: true, signature };
 }
 
+export type SettleOnchainProof = {
+  /** Full TxLINE validate_stat_v2 instruction data (discriminator + args). */
+  proofIxData: Buffer;
+  dailyScoresPda: PublicKey;
+  txoracleProgramId?: PublicKey;
+};
+
 export async function settleMarketOnchain(
   market: MarketPool,
   homeScore: number,
-  awayScore: number
+  awayScore: number,
+  proof: SettleOnchainProof
 ): Promise<OnchainMutation> {
   if (
     !Number.isInteger(homeScore) ||
@@ -398,6 +410,9 @@ export async function settleMarketOnchain(
     awayScore > 255
   ) {
     throw new Error("scores must be integers from 0 to 255");
+  }
+  if (!proof?.proofIxData?.length) {
+    throw new Error("on-chain settle requires validate_stat_v2 proof bytes");
   }
   const { connection, programId, authority } = requiredOnchainRuntime();
   const marketPda = deriveMarketPDA(
@@ -412,18 +427,33 @@ export async function settleMarketOnchain(
   if (status === 2) throw new Error("on-chain market is already void");
   if (status === null) throw new Error("on-chain market account is missing");
 
+  const network = (process.env.TXLINE_NETWORK || "devnet").toLowerCase();
+  const txoracle =
+    proof.txoracleProgramId ||
+    new PublicKey(
+      network === "mainnet" || network === "mainnet-beta"
+        ? TXLINE_MAINNET.programId
+        : TXLINE_DEVNET.programId
+    );
+
+  const proofLen = Buffer.alloc(4);
+  proofLen.writeUInt32LE(proof.proofIxData.length, 0);
+
   const instruction = new TransactionInstruction({
     programId,
     keys: [
       { pubkey: authority.publicKey, isSigner: true, isWritable: false },
       { pubkey: deriveConfigPDA(programId), isSigner: false, isWritable: false },
       { pubkey: marketPda, isSigner: false, isWritable: true },
+      // remaining: txoracle program + daily_scores_roots PDA for validate_stat_v2 CPI
+      { pubkey: txoracle, isSigner: false, isWritable: false },
+      { pubkey: proof.dailyScoresPda, isSigner: false, isWritable: false },
     ],
     data: Buffer.concat([
       anchorDiscriminator("global", "settle"),
       Buffer.from([homeScore, awayScore, 1]),
-      // Borsh Vec<u8> length prefix — empty proof_ix_data (CPI optional)
-      Buffer.alloc(4),
+      proofLen,
+      proof.proofIxData,
     ]),
   });
   const signature = await sendAndConfirmTransaction(
@@ -433,6 +463,31 @@ export async function settleMarketOnchain(
     { commitment: "confirmed" }
   );
   return { status: "submitted", signature };
+}
+
+/** Build on-chain settle proof from a TxLINE validation payload + FT scores. */
+export function buildSettleProofFromValidation(
+  validation: unknown,
+  homeScore: number,
+  awayScore: number,
+  network: "devnet" | "mainnet" = "devnet"
+): SettleOnchainProof {
+  const proofIxData = buildValidateStatV2IxData(validation, { homeScore, awayScore });
+  const merkle = extractMerkleSummary(validation, network);
+  const programId = network === "mainnet" ? TXLINE_MAINNET.programId : TXLINE_DEVNET.programId;
+  const pda =
+    merkle.dailyScoresPda ||
+    (merkle.epochDay !== undefined
+      ? deriveDailyScoresPda(programId, merkle.epochDay)
+      : undefined);
+  if (!pda) {
+    throw new Error("cannot derive daily_scores_roots PDA from validation");
+  }
+  return {
+    proofIxData,
+    dailyScoresPda: new PublicKey(pda),
+    txoracleProgramId: new PublicKey(programId),
+  };
 }
 
 export async function voidMarketOnchain(market: MarketPool): Promise<OnchainMutation> {

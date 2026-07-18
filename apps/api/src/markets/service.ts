@@ -26,7 +26,11 @@ import {
   reconcileStateMarkets,
   type MarketReconcileOptions,
 } from "./lifecycle";
-import { settleMarketOnchain, voidMarketOnchain } from "../settlement/onchain";
+import {
+  settleMarketOnchain,
+  voidMarketOnchain,
+  type SettleOnchainProof,
+} from "../settlement/onchain";
 
 function defaultOutcomes(
   marketType: MarketType,
@@ -257,6 +261,8 @@ export type SettleContext = {
   winningOutcome?: MarketOutcome;
   /** Knockout advancer after ET/pens when regulation is level. */
   advancingSide?: "home" | "away" | null;
+  /** Required for on-chain settle of match_result / total_goals (validate_stat_v2). */
+  onchainProof?: SettleOnchainProof;
 };
 
 export function settleMarketOffchain(
@@ -345,15 +351,11 @@ export async function settleMarketVerified(
   }
 
   let signature: string | undefined;
-  const onchainType =
-    market.marketType === "match_result" ||
-    market.marketType === "total_goals" ||
-    market.marketType === "total_corners";
-  if (onchainEnabled && market.totalPool > 0 && onchainType) {
-    const onchainHome =
-      market.marketType === "total_corners" ? Math.round(ctx.homeCorners ?? 0) : homeScore;
-    const onchainAway =
-      market.marketType === "total_corners" ? Math.round(ctx.awayCorners ?? 0) : awayScore;
+  // Only market types whose winning outcome is fully determined by TxLINE
+  // home/away goal stats can hard-settle on-chain with validate_stat_v2.
+  const onchainProvable =
+    market.marketType === "match_result" || market.marketType === "total_goals";
+  if (onchainEnabled && market.totalPool > 0 && onchainProvable) {
     // When a knockout is settled via advancingSide after a level score, keep
     // ledger settlement only — on-chain program cannot encode "advancer".
     const skipOnchain =
@@ -361,8 +363,22 @@ export async function settleMarketVerified(
       homeScore === awayScore &&
       (ctx.advancingSide === "home" || ctx.advancingSide === "away");
     if (!skipOnchain) {
-      signature = (await settleMarketOnchain(market, onchainHome, onchainAway)).signature;
+      if (!ctx.onchainProof?.proofIxData?.length) {
+        throw new Error("on-chain settle requires validate_stat_v2 proof");
+      }
+      signature = (
+        await settleMarketOnchain(market, homeScore, awayScore, ctx.onchainProof)
+      ).signature;
     }
+  } else if (
+    onchainEnabled &&
+    market.totalPool > 0 &&
+    market.marketType === "total_corners"
+  ) {
+    // Corner counts are not covered by soccer goal-stat Merkle proofs.
+    throw new Error(
+      "on-chain total_corners settle requires corner-stat proofs (not yet available)"
+    );
   }
   return settleMarketOffchain(marketId, homeScore, awayScore, signature, ctx);
 }

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-    "test": "npm run build && node --test dist/config.test.js dist/fixtures/publicSchedule.test.js dist/fixtures/teamAssets.test.js dist/forecast.test.js dist/forecastHistory.test.js dist/intelligence.test.js dist/markets/lifecycle.test.js dist/markets/service.test.js dist/match/stats.test.js dist/settlement/merkle.test.js dist/settlement/keeper.pending.test.js dist/txline/client.test.js",
+    "test": "npm run build && node --test dist/config.test.js dist/fixtures/publicSchedule.test.js dist/fixtures/teamAssets.test.js dist/forecast.test.js dist/forecastHistory.test.js dist/intelligence.test.js dist/markets/lifecycle.test.js dist/markets/service.test.js dist/match/stats.test.js dist/settlement/merkle.test.js dist/settlement/encodeValidateStatV2.test.js dist/settlement/keeper.pending.test.js dist/txline/client.test.js",
     "start": "node dist/index.js",
     "activate-txline": "tsx src/scripts/activate-txline.ts"
   },

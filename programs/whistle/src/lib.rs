@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 use anchor_spl::token::{self, Mint, Token, TokenAccount, Transfer};
 
-declare_id!("3YtgbTqz6nUyXa3LtjbxeZhbTuLJLUJPzMMNziM535DX");
+declare_id!("C2vCTGZDJYvcd8jdgvFF57FnfdDsUqQy7qogjP2SmDcU");
 
 pub const TXORACLE_DEVNET: Pubkey = pubkey!("6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J");
 pub const MAX_FEE_BPS: u16 = 1_000;
@@ -106,12 +106,11 @@ pub mod whistle {
         Ok(())
     }
 
-    /// Settles a market after verifying match outcome.
+    /// Settles a market after verifying match outcome via TxLINE.
     ///
-    /// When `proof_ix_data` is non-empty, the keeper must also pass
-    /// `txoracle_program` + `daily_scores_merkle_roots` and this instruction
-    /// CPIs into TxLINE `validate_stat_v2` (instruction bytes pre-built off-chain).
-    /// The CPI return data must be the boolean `true`.
+    /// Requires non-empty `proof_ix_data` (full `validate_stat_v2` instruction
+    /// bytes) plus remaining accounts `[txoracle_program, daily_scores_roots]`.
+    /// The CPI return data must be the boolean `true`. Soft/empty proofs are rejected.
     pub fn settle(
         ctx: Context<Settle>,
         home_score: u8,
@@ -125,32 +124,43 @@ pub mod whistle {
             WhistleError::MarketNotOpen
         );
         require!(validation_ok, WhistleError::ValidationRequired);
+        require!(
+            !proof_ix_data.is_empty(),
+            WhistleError::ValidationRequired
+        );
+        require!(
+            ctx.remaining_accounts.len() >= 2,
+            WhistleError::ValidationRequired
+        );
 
-        if !proof_ix_data.is_empty() {
-            // remaining_accounts[0] = txoracle program, [1] = daily_scores_roots PDA
-            require!(
-                ctx.remaining_accounts.len() >= 2,
-                WhistleError::ValidationRequired
-            );
-            let txoracle = &ctx.remaining_accounts[0];
-            let roots = &ctx.remaining_accounts[1];
-            require_keys_eq!(*txoracle.key, TXORACLE_DEVNET);
+        let txoracle = &ctx.remaining_accounts[0];
+        let roots = &ctx.remaining_accounts[1];
+        require_keys_eq!(*txoracle.key, TXORACLE_DEVNET);
 
-            let ix = anchor_lang::solana_program::instruction::Instruction {
-                program_id: *txoracle.key,
-                accounts: vec![
-                    anchor_lang::solana_program::instruction::AccountMeta::new_readonly(
-                        *roots.key,
-                        false,
-                    ),
-                ],
-                data: proof_ix_data,
-            };
-            anchor_lang::solana_program::program::invoke(
-                &ix,
-                &[txoracle.clone(), roots.clone()],
-            )?;
-        }
+        let ix = anchor_lang::solana_program::instruction::Instruction {
+            program_id: *txoracle.key,
+            accounts: vec![
+                anchor_lang::solana_program::instruction::AccountMeta::new_readonly(
+                    *roots.key,
+                    false,
+                ),
+            ],
+            data: proof_ix_data,
+        };
+        anchor_lang::solana_program::program::invoke(
+            &ix,
+            &[txoracle.clone(), roots.clone()],
+        )?;
+
+        let (returning_program, return_data) =
+            anchor_lang::solana_program::program::get_return_data()
+                .ok_or(error!(WhistleError::ValidationRequired))?;
+        require_keys_eq!(returning_program, *txoracle.key);
+        // Anchor bool `true` is a single 0x01 byte.
+        require!(
+            return_data.as_slice() == [1u8],
+            WhistleError::ValidationRequired
+        );
 
         // Deterministic resolution — same mapping as off-chain keeper
         let winning: u8 = if market.market_type == 0 {
