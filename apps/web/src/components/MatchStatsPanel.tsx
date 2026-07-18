@@ -2,6 +2,11 @@
 
 import type { MatchEvent, MatchStats } from "@whistle/shared";
 import { formatClock, useLocalTimeContext } from "../lib/local-time";
+import {
+  filterMatchEventTape,
+  formatMatchEventMeta,
+  preferRicherEventTape,
+} from "../lib/matchEvents";
 
 function Bar({
   label,
@@ -78,7 +83,9 @@ export function MatchStatsPanel({
   liveEvents?: MatchEvent[];
 }) {
   const localTime = useLocalTimeContext();
-  const events = (stats?.events?.length ? stats.events : liveEvents) || [];
+  const events = filterMatchEventTape(
+    preferRicherEventTape(stats?.events, liveEvents)
+  );
 
   if (!stats && !events.length) {
     return (
@@ -130,24 +137,25 @@ export function MatchStatsPanel({
             No timed events yet for this fixture.
           </p>
         )}
-        {events.map((e, i) => (
-          <div
-            key={`${e.minute}-${e.type}-${i}`}
-            className="mono"
-            style={{
-              fontSize: "0.75rem",
-              padding: "0.45rem 0.55rem",
-              borderBottom: "1px solid var(--line)",
-              color: "var(--mute)",
-            }}
-          >
-            <span style={{ color: "var(--cyan)" }}>{e.minute ?? "—"}&apos;</span>{" "}
-            <span style={{ color: "var(--ink)" }}>{e.type.replace(/_/g, " ")}</span>
-            {e.team ? ` · ${e.team}` : ""}
-            {e.player ? ` · ${e.player}` : ""}
-            {e.detail ? ` — ${e.detail}` : ""}
-          </div>
-        ))}
+        {events.map((e, i) => {
+          const meta = formatMatchEventMeta(e, homeName, awayName);
+          return (
+            <div
+              key={`${e.minute}-${e.type}-${e.player}-${i}`}
+              className="mono"
+              style={{
+                fontSize: "0.75rem",
+                padding: "0.45rem 0.55rem",
+                borderBottom: "1px solid var(--line)",
+                color: "var(--mute)",
+              }}
+            >
+              <span style={{ color: "var(--cyan)" }}>{e.minute ?? "—"}&apos;</span>{" "}
+              <span style={{ color: "var(--ink)" }}>{e.type.replace(/_/g, " ")}</span>
+              {meta ? ` · ${meta}` : ""}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

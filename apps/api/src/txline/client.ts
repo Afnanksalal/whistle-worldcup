@@ -305,32 +305,24 @@ export function normalizeFixture(raw: unknown): Fixture | null {
 }
 
 function teamSideFromParticipant(
-  value: unknown
+  value: unknown,
+  participant1IsHome: boolean | undefined = true
 ): "home" | "away" | undefined {
+  const p1Home = participant1IsHome !== false;
   if (typeof value === "number") {
-    if (value === 1) return "home";
-    if (value === 2) return "away";
+    if (value === 1) return p1Home ? "home" : "away";
+    if (value === 2) return p1Home ? "away" : "home";
   }
   const text = String(value || "").toLowerCase();
   if (!text) return undefined;
-  if (
-    text === "1" ||
-    text === "home" ||
-    text === "participant1" ||
-    text === "team1" ||
-    text.includes("home")
-  ) {
-    return "home";
+  if (text === "1" || text === "participant1" || text === "team1") {
+    return p1Home ? "home" : "away";
   }
-  if (
-    text === "2" ||
-    text === "away" ||
-    text === "participant2" ||
-    text === "team2" ||
-    text.includes("away")
-  ) {
-    return "away";
+  if (text === "2" || text === "participant2" || text === "team2") {
+    return p1Home ? "away" : "home";
   }
+  if (text === "home" || text.includes("home")) return "home";
+  if (text === "away" || text.includes("away")) return "away";
   return undefined;
 }
 
@@ -340,17 +332,129 @@ function normalizeActionType(action: string): string {
   if (a.includes("red") && a.includes("card")) return "red_card";
   if (a.includes("corner")) return "corner";
   if (a.includes("substitut")) return "substitution";
+  if (a === "penalty_outcome") return "penalty";
   if (a.includes("penalty")) return "penalty";
   if (a === "goal" || a.includes("goal_scored") || a === "score") return "goal";
   if (a.includes("shot")) return "shot";
   if (a.includes("free_kick") || a.includes("freekick")) return "free_kick";
   if (a.includes("var")) return "var";
   if (a.includes("offside")) return "offside";
+  if (a.includes("injur")) return "injury";
   return a || "event";
 }
 
+/** TxLINE sends "Surname, Forename" — normalize to "Forename Surname" for UI. */
+export function formatPlayerDisplayName(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed.includes(",")) return trimmed;
+  const [last, ...rest] = trimmed.split(",").map((part) => part.trim());
+  const first = rest.join(" ").trim();
+  return first && last ? `${first} ${last}` : trimmed;
+}
+
+/** Walk a TxLINE lineups / players payload for normativeId → display name. */
+export function extractPlayerDirectory(raw: unknown): Record<string, string> {
+  const out: Record<string, string> = {};
+  const visit = (node: unknown, depth: number) => {
+    if (!node || depth > 8) return;
+    if (Array.isArray(node)) {
+      for (const item of node) visit(item, depth + 1);
+      return;
+    }
+    if (typeof node !== "object") return;
+    const o = node as Record<string, unknown>;
+    const id =
+      pickNumber(o, ["normativeId", "NormativeId", "playerId", "PlayerId", "id"]) ??
+      (o.player && typeof o.player === "object"
+        ? pickNumber(o.player as Record<string, unknown>, [
+            "normativeId",
+            "NormativeId",
+            "playerId",
+            "PlayerId",
+            "id",
+          ])
+        : undefined);
+    const nameRaw =
+      pickString(o, ["preferredName", "PreferredName", "displayName", "name"]) ||
+      (o.player && typeof o.player === "object"
+        ? pickString(o.player as Record<string, unknown>, [
+            "preferredName",
+            "PreferredName",
+            "displayName",
+            "name",
+          ])
+        : undefined);
+    if (id != null && nameRaw) {
+      // Skip team-level labels accidentally picked up as players.
+      const name = formatPlayerDisplayName(nameRaw);
+      if (name && !/^(france|england|home|away)$/i.test(name)) {
+        out[String(id)] = name;
+      }
+    }
+    for (const value of Object.values(o)) visit(value, depth + 1);
+  };
+  visit(raw, 0);
+  return out;
+}
+
+export function resolvePlayerName(
+  directory: Record<string, string> | undefined,
+  ...ids: Array<number | string | undefined | null>
+): string | undefined {
+  if (!directory) return undefined;
+  for (const id of ids) {
+    if (id == null || id === "") continue;
+    const name = directory[String(id)];
+    if (name) return name;
+  }
+  return undefined;
+}
+
+/** Parse TxLINE Clock `{ Running, Seconds }` or plain minute fields. */
+export function extractClockSeconds(raw: unknown): number | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const o = raw as Record<string, unknown>;
+  const clock = o.Clock ?? o.clock;
+  if (clock && typeof clock === "object") {
+    const seconds = pickNumber(clock as Record<string, unknown>, [
+      "Seconds",
+      "seconds",
+      "Value",
+      "value",
+    ]);
+    if (seconds != null) return seconds;
+  }
+  const direct =
+    pickNumber(o, ["clockSeconds", "ClockSeconds"]) ??
+    pickNumber(
+      (o.Data as Record<string, unknown>) || {},
+      ["Seconds", "seconds", "Minute", "minute"]
+    );
+  return direct;
+}
+
+export function clockSecondsToMinute(seconds: number | undefined): number | undefined {
+  if (seconds == null || !Number.isFinite(seconds) || seconds < 0) return undefined;
+  return Math.min(120, Math.floor(seconds / 60));
+}
+
+function playerIdsFromData(data: Record<string, unknown>): {
+  playerId?: number;
+  playerInId?: number;
+  playerOutId?: number;
+} {
+  return {
+    playerId: pickNumber(data, ["PlayerId", "playerId", "Player", "player"]),
+    playerInId: pickNumber(data, ["PlayerInId", "playerInId", "PlayerIn"]),
+    playerOutId: pickNumber(data, ["PlayerOutId", "playerOutId", "PlayerOut"]),
+  };
+}
+
 /** Extract MatchEvent(s) from a raw TxLINE soccer score record. */
-export function extractScoreEvents(raw: unknown): MatchEvent[] {
+export function extractScoreEvents(
+  raw: unknown,
+  directory?: Record<string, string>
+): MatchEvent[] {
   if (!raw || typeof raw !== "object") return [];
   const o = raw as Record<string, unknown>;
   const action = pickString(o, ["action", "Action", "event", "EventType", "type"]);
@@ -361,6 +465,11 @@ export function extractScoreEvents(raw: unknown): MatchEvent[] {
     {};
   const nestedEvents = asArray(o.events || o.Events || data.events);
   const out: MatchEvent[] = [];
+  const minuteFromClock = clockSecondsToMinute(extractClockSeconds(o));
+  const p1IsHome = (o.Participant1IsHome ??
+    o.participant1IsHome ??
+    data.Participant1IsHome ??
+    data.participant1IsHome) as boolean | undefined;
 
   for (const item of nestedEvents) {
     if (!item || typeof item !== "object") continue;
@@ -368,53 +477,95 @@ export function extractScoreEvents(raw: unknown): MatchEvent[] {
     const type = normalizeActionType(
       pickString(ev, ["type", "Type", "action", "Action"]) || "event"
     );
+    const ids = playerIdsFromData(ev);
+    const playerId = ids.playerId ?? ids.playerInId;
     out.push({
       type,
-      minute: pickNumber(ev, ["minute", "Minute", "clock", "Clock"]),
+      minute:
+        pickNumber(ev, ["minute", "Minute"]) ??
+        clockSecondsToMinute(extractClockSeconds(ev)) ??
+        minuteFromClock,
       team: teamSideFromParticipant(
-        ev.participant ?? ev.Participant ?? ev.team ?? ev.Team
+        ev.participant ?? ev.Participant ?? ev.team ?? ev.Team,
+        p1IsHome
       ),
-      player: pickString(ev, [
-        "player",
-        "Player",
-        "playerName",
-        "PlayerName",
-        "PlayerFullName",
-      ]),
+      player:
+        pickString(ev, [
+          "player",
+          "Player",
+          "playerName",
+          "PlayerName",
+          "PlayerFullName",
+        ]) ||
+        resolvePlayerName(directory, ids.playerId, ids.playerInId),
+      playerId: playerId != null ? String(playerId) : undefined,
       detail: pickString(ev, ["detail", "Detail", "text", "Text", "outcome", "Outcome"]),
     });
   }
 
   if (!action) return out;
   const type = normalizeActionType(action);
-  // Skip pure status / heartbeat actions unless they carry player detail.
+  // Meta / heartbeat / lineup roster rows are handled separately.
   const skip =
     type.includes("game_") ||
     type.includes("period_") ||
     type === "comment" ||
-    type === "heartbeat";
-  if (skip && !pickString(data, ["PlayerName", "playerName", "Player"])) {
+    type === "heartbeat" ||
+    type === "lineups" ||
+    type === "players_on_the_pitch" ||
+    type === "players_warming_up" ||
+    type === "jersey" ||
+    type === "pitch" ||
+    type === "venue" ||
+    type === "weather" ||
+    type === "coverage_update" ||
+    type === "connected" ||
+    type === "kickoff_team";
+  const ids = playerIdsFromData(data);
+  const named =
+    pickString(data, ["PlayerName", "playerName", "Player", "PlayerFullName"]) ||
+    resolvePlayerName(directory, ids.playerId, ids.playerInId);
+  if (skip && !named && !ids.playerId && !ids.playerInId) {
     return out;
   }
 
+  const playerOut = resolvePlayerName(directory, ids.playerOutId);
+  const playerIn = resolvePlayerName(directory, ids.playerInId);
+  const detailParts = [
+    pickString(data, [
+      "Text",
+      "text",
+      "Outcome",
+      "outcome",
+      "GoalType",
+      "Type",
+      "FreeKickType",
+    ]),
+    type === "substitution" && playerOut
+      ? `on for ${playerOut}`
+      : type === "substitution" && ids.playerOutId
+        ? `on for #${ids.playerOutId}`
+        : undefined,
+  ].filter(Boolean);
+
+  const primaryId = ids.playerId ?? ids.playerInId;
   out.push({
     type,
     minute:
-      pickNumber(data, ["Minute", "minute", "Clock", "clock"]) ??
-      pickNumber(o, ["minute", "Minute", "clock", "Clock"]),
+      pickNumber(data, ["Minute", "minute"]) ??
+      minuteFromClock ??
+      pickNumber(o, ["minute", "Minute"]),
     team: teamSideFromParticipant(
-      data.Participant ?? data.participant ?? data.Team ?? o.participant
+      data.Participant ??
+        data.participant ??
+        data.Team ??
+        o.Participant ??
+        o.participant,
+      p1IsHome
     ),
-    player: pickString(data, [
-      "PlayerName",
-      "playerName",
-      "Player",
-      "player",
-      "PlayerFullName",
-    ]),
-    detail:
-      pickString(data, ["Text", "text", "Outcome", "outcome", "Type", "FreeKickType"]) ||
-      action,
+    player: named || playerIn,
+    playerId: primaryId != null ? String(primaryId) : undefined,
+    detail: detailParts.length ? detailParts.join(" · ") : action,
   });
   return out;
 }
@@ -424,6 +575,9 @@ export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
   const o = raw as Record<string, unknown>;
   const fixtureId = pickString(o, ["fixtureId", "id", "FixtureId", "fixture_id"]);
   if (!fixtureId) return null;
+
+  const playerDirectory = extractPlayerDirectory(raw);
+  const hasDirectory = Object.keys(playerDirectory).length > 0;
 
   const txlineGoals = pickTxlineGoals(o);
   const homeScore =
@@ -438,9 +592,27 @@ export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
   const statusId = pickNumber(o, ["statusId", "StatusId", "status_id"]);
   const action = pickString(o, ["action", "Action", "event"]);
   const period = pickString(o, ["period", "Period"]) ?? pickNumber(o, ["period", "Period"]);
+  const actionLower = (action || "").toLowerCase();
 
   let status: Fixture["status"] = "unknown";
   const statusRaw = (pickString(o, ["status", "Status", "GameState"]) || "").toLowerCase();
+  const looksInPlay =
+    statusRaw.includes("live") ||
+    statusRaw.includes("inplay") ||
+    statusRaw.includes("progress") ||
+    // Native soccer statusId: 1 ≈ pre-match, 100 ≈ final; 2–99 are in-play phases.
+    (statusId != null && statusId > 1 && statusId < 100) ||
+    actionLower.includes("score") ||
+    actionLower.includes("goal") ||
+    actionLower.includes("kickoff") ||
+    actionLower.includes("possession") ||
+    actionLower.includes("penalty") ||
+    actionLower.includes("substitut") ||
+    actionLower.includes("card") ||
+    actionLower.includes("corner") ||
+    actionLower.includes("var") ||
+    actionLower.includes("injur") ||
+    actionLower.includes("shot");
   if (statusRaw.includes("cancel") || statusRaw.includes("abandon")) {
     status = "cancelled";
   } else if (statusRaw.includes("postpon")) {
@@ -451,28 +623,35 @@ export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
     isFinalScoreRecord({ action, statusId, period })
   ) {
     status = "finished";
-  } else if (statusRaw.includes("schedul") || statusRaw.includes("pre")) {
-    // Native tapes often label every row GameState=scheduled, including finals.
-    status = isFinalScoreRecord({ action, statusId, period }) ? "finished" : "scheduled";
-  } else if (
-    statusRaw.includes("live") ||
-    statusRaw.includes("inplay") ||
-    statusRaw.includes("progress") ||
-    action?.toLowerCase().includes("score") ||
-    action?.toLowerCase().includes("goal")
-  ) {
+  } else if (looksInPlay) {
+    // TxLINE often stamps GameState="scheduled" on every live soccer row.
     status = "live";
+  } else if (statusRaw.includes("schedul") || statusRaw.includes("pre")) {
+    status = "scheduled";
   }
 
-  const scoreOptional = status === "cancelled" || status === "postponed";
+  const scoreOptional =
+    status === "cancelled" ||
+    status === "postponed" ||
+    // Lineup / meta rows omit Stats goals — keep prior score in ingest.
+    (homeScore === undefined && awayScore === undefined && hasDirectory) ||
+    (homeScore === undefined &&
+      awayScore === undefined &&
+      (actionLower === "lineups" ||
+        actionLower === "players_on_the_pitch" ||
+        actionLower === "players_warming_up"));
+
   if (!scoreOptional && (homeScore === undefined || awayScore === undefined)) {
     return null;
   }
 
   const eventTs =
     pickTimestamp(o, ["ts", "timestamp", "Timestamp", "Ts"]) ?? Date.now();
-  const events = extractScoreEvents(raw);
+  const clockSeconds = extractClockSeconds(o);
+  const minute = clockSecondsToMinute(clockSeconds);
+  const events = extractScoreEvents(raw, hasDirectory ? playerDirectory : undefined);
 
+  const scoreOmitted = homeScore === undefined || awayScore === undefined;
   return {
     fixtureId,
     homeScore: homeScore ?? 0,
@@ -481,8 +660,16 @@ export function normalizeScoreUpdate(raw: unknown): LiveScoreUpdate | null {
     statusId,
     action,
     period,
-    clock: pickString(o, ["clock", "Clock", "minute", "time"]),
+    clock:
+      minute != null
+        ? String(minute)
+        : pickString(o, ["minute", "time"]) ||
+          (typeof o.Clock === "string" ? o.Clock : undefined) ||
+          (typeof o.clock === "string" ? o.clock : undefined),
+    clockSeconds,
     events: events.length ? events : undefined,
+    playerDirectory: hasDirectory ? playerDirectory : undefined,
+    scoreOmitted: scoreOmitted || undefined,
     ts: eventTs,
   };
 }

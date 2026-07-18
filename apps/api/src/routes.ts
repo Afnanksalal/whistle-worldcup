@@ -187,12 +187,17 @@ export function createRouter(cfg: AppConfig) {
     const squadId = typeof req.query.squadId === "string" ? req.query.squadId : undefined;
     const markets = listMarkets(fixture.id, squadId);
 
-    // Refresh stats/insights in the background if stale (>45s)
+    // Refresh stats/insights in the background if stale (>45s).
+    // Include TxLINE in-play tapes that still label fixture.status as "scheduled".
     const statsAge = getMatchStats(fixture.id)?.updatedAt || 0;
-    if (
-      (fixture.status === "live" || fixture.status === "finished") &&
-      Date.now() - statsAge > 45_000
-    ) {
+    const inPlayTape =
+      fixture.status === "live" ||
+      fixture.status === "finished" ||
+      live?.status === "live" ||
+      live?.statusId === 100 ||
+      (live?.statusId != null && live.statusId > 1 && live.statusId < 100) ||
+      Boolean(live?.events?.some((e) => e.type === "goal" || e.type === "penalty"));
+    if (inPlayTape && Date.now() - statsAge > 45_000) {
       void refreshMatchStats(fixture.id)
         .then(() => buildInsights(fixture.id))
         .catch(() => undefined);

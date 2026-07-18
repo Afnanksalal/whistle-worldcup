@@ -1,6 +1,7 @@
 import { EventSource } from "eventsource";
 import {
   Fixture,
+  LiveScoreUpdate,
   OddsQuote,
   enrichCompetitionPhases,
   isFinalScoreRecord,
@@ -9,9 +10,12 @@ import {
   TxlineConfig,
   enrichFinishedFixtureScores,
   fetchFixtures,
+  fetchHistoricalScores,
   fetchScoresSnapshot,
   normalizeFixture,
   normalizeScoreUpdate,
+  pickBestScoreRecord,
+  resolvePlayerName,
   sseUrl,
   txlineHeaders,
 } from "./client";
@@ -36,6 +40,17 @@ export type FixtureSource = "txline" | "thesportsdb";
 /** Infer group vs knockout round labels from TxLINE FixtureGroupId cohorts. */
 function withCompetitionPhases(fixtures: Fixture[]): Fixture[] {
   return enrichCompetitionPhases(fixtures);
+}
+
+/** Prefer terminal / in-play statuses over stale "scheduled" labels on refresh. */
+function mergeFixtureStatus(
+  prev: Fixture["status"],
+  next: Fixture["status"]
+): Fixture["status"] {
+  if (next === "finished" || prev === "finished") return "finished";
+  if (next === "cancelled" || next === "postponed") return next;
+  if (prev === "live" || next === "live") return "live";
+  return next;
 }
 
 let onchainEnabled = false;
@@ -238,7 +253,19 @@ export async function refreshFixtures(cfg: TxlineConfig | null) {
             ? {
                 ...prev,
                 ...f,
+                // Keep TheSportsDB ids / formations written by matchContext.
+                raw:
+                  f.raw && typeof f.raw === "object"
+                    ? {
+                        ...(typeof prev.raw === "object" && prev.raw
+                          ? (prev.raw as Record<string, unknown>)
+                          : {}),
+                        ...(f.raw as Record<string, unknown>),
+                      }
+                    : prev.raw ?? f.raw,
                 score: f.score ?? prev.score,
+                // Don't let a schedule refresh clobber an in-play/finished status.
+                status: mergeFixtureStatus(prev.status, f.status),
                 home: {
                   ...f.home,
                   logo: f.home.logo || prev.home.logo,
@@ -295,29 +322,80 @@ function eventKey(event: {
   ].join("|");
 }
 
+function mergePlayerDirectory(
+  prev?: Record<string, string>,
+  next?: Record<string, string>
+): Record<string, string> | undefined {
+  if (!prev && !next) return undefined;
+  return { ...(prev || {}), ...(next || {}) };
+}
+
+function enrichEventsWithDirectory(
+  events: NonNullable<LiveScoreUpdate["events"]>,
+  directory?: Record<string, string>
+): NonNullable<LiveScoreUpdate["events"]> {
+  if (!directory || !Object.keys(directory).length) return events;
+  return events.map((event) => {
+    const resolvedPlayer =
+      event.player ||
+      resolvePlayerName(directory, event.playerId, event.detail?.match(/#(\d+)/)?.[1]);
+    let detail = event.detail;
+    if (detail) {
+      detail = detail.replace(/#(\d+)/g, (_match, id: string) => {
+        return resolvePlayerName(directory, id) || `#${id}`;
+      });
+    }
+    if (resolvedPlayer === event.player && detail === event.detail) return event;
+    return {
+      ...event,
+      player: resolvedPlayer,
+      detail,
+    };
+  });
+}
+
 function applyScoreUpdate(update: ReturnType<typeof normalizeScoreUpdate>) {
   if (!update) return;
   markIngest();
   mutate((s) => {
     const prev = s.live[update.fixtureId];
-    const mergedEvents = [...(prev?.events || [])];
+    const directory = mergePlayerDirectory(prev?.playerDirectory, update.playerDirectory);
+    const incoming = enrichEventsWithDirectory(update.events || [], directory);
+    const mergedEvents = enrichEventsWithDirectory([...(prev?.events || [])], directory);
     const seen = new Set(mergedEvents.map(eventKey));
-    for (const event of update.events || []) {
+    for (const event of incoming) {
       const key = eventKey(event);
       if (seen.has(key)) continue;
       seen.add(key);
       mergedEvents.push(event);
     }
     mergedEvents.sort((a, b) => (a.minute || 0) - (b.minute || 0));
+
+    // Lineup/meta rows omit Stats goals — keep prior score.
+    const metaOnly = Boolean(update.scoreOmitted && prev);
+    const homeScore = metaOnly ? prev!.homeScore : update.homeScore;
+    const awayScore = metaOnly ? prev!.awayScore : update.awayScore;
+
     s.live[update.fixtureId] = {
+      ...prev,
       ...update,
+      homeScore,
+      awayScore,
+      status: mergeFixtureStatus(prev?.status || "unknown", update.status),
+      playerDirectory: directory,
       events: mergedEvents.length ? mergedEvents : update.events,
+      clock: update.clock ?? prev?.clock,
+      clockSeconds: update.clockSeconds ?? prev?.clockSeconds,
     };
     const f = s.fixtures[update.fixtureId];
     if (f) {
-      f.score = { home: update.homeScore, away: update.awayScore };
-      f.status = update.status;
-      f.period = update.period;
+      if (!metaOnly) {
+        f.score = { home: homeScore, away: awayScore };
+      } else if (!f.score && prev) {
+        f.score = { home: prev.homeScore, away: prev.awayScore };
+      }
+      f.status = mergeFixtureStatus(f.status, update.status);
+      f.period = update.period ?? f.period;
     } else {
       log().warn({ fixtureId: update.fixtureId }, "score for unknown fixture");
     }
@@ -354,6 +432,64 @@ function applyScoreUpdate(update: ReturnType<typeof normalizeScoreUpdate>) {
   }
 }
 
+/** Replay a fixture's TxLINE score snapshot so lineups/PlayerIds catch up after restarts. */
+export async function backfillFixtureScoreTape(
+  cfg: TxlineConfig,
+  fixtureId: string
+): Promise<number> {
+  const rows = await fetchHistoricalScores(cfg, fixtureId);
+  let applied = 0;
+  for (const row of rows) {
+    const update = normalizeScoreUpdate(row);
+    if (!update) continue;
+    // Skip pre-match / empty score shells that would clobber a real tape.
+    if (
+      update.scoreOmitted &&
+      !update.playerDirectory &&
+      !(update.events || []).length
+    ) {
+      continue;
+    }
+    applyScoreUpdate(update);
+    applied += 1;
+  }
+  // Snapshot row order is not reliable — pin the canonical final/best score last.
+  const best = pickBestScoreRecord(rows);
+  const bestUpdate = best ? normalizeScoreUpdate(best) : null;
+  if (bestUpdate && !bestUpdate.scoreOmitted) {
+    applyScoreUpdate(bestUpdate);
+    applied += 1;
+  }
+  if (applied) {
+    log().info({ fixtureId, applied }, "backfilled TxLINE score tape");
+  }
+  return applied;
+}
+
+export async function backfillActiveScoreTapes(cfg: TxlineConfig): Promise<void> {
+  const state = getState();
+  const ids = Object.values(state.fixtures)
+    .filter((fixture) => {
+      if (fixture.status === "live" || fixture.status === "finished") return true;
+      const live = state.live[fixture.id];
+      if (!live) return false;
+      if (live.status === "live" || live.statusId === 100) return true;
+      if (live.statusId != null && live.statusId > 1 && live.statusId < 100) return true;
+      return Boolean(live.events?.some((e) => e.type === "goal" || e.type === "penalty"));
+    })
+    .sort((a, b) => b.kickoffTs - a.kickoffTs)
+    .slice(0, 8)
+    .map((fixture) => fixture.id);
+
+  for (const fixtureId of ids) {
+    try {
+      await backfillFixtureScoreTape(cfg, fixtureId);
+    } catch (err) {
+      log().warn({ err, fixtureId }, "score tape backfill failed");
+    }
+  }
+}
+
 export function startSseIngest(cfg: TxlineConfig) {
   if (activeSource !== "txline") {
     log().info("SSE skipped — board sourced from public sports API");
@@ -363,6 +499,10 @@ export function startSseIngest(cfg: TxlineConfig) {
   const streamKey = cfg.apiOrigin;
   if (activeSseKey === streamKey && activeSseStop) return activeSseStop;
   if (activeSseStop) activeSseStop();
+
+  void backfillActiveScoreTapes(cfg).catch((err) => {
+    log().warn({ err }, "active score tape backfill failed");
+  });
 
   const scoresUrl = sseUrl(cfg, "scores");
   log().info({ scoresUrl }, "connecting scores SSE");

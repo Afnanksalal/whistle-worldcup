@@ -54,8 +54,15 @@ export interface LiveScoreUpdate {
   statusId?: number;
   action?: string;
   period?: string | number;
+  /** Elapsed minute as a display string (e.g. "78"), derived from TxLINE Clock.Seconds when needed. */
   clock?: string;
+  /** Raw TxLINE clock seconds when the provider sends `{ Running, Seconds }`. */
+  clockSeconds?: number;
   events?: MatchEvent[];
+  /** PlayerId / normativeId → display name from TxLINE lineups tape. */
+  playerDirectory?: Record<string, string>;
+  /** True when this row had no Stats goals (lineups/meta) — ingest must keep prior score. */
+  scoreOmitted?: boolean;
   ts: number;
 }
 
@@ -63,7 +70,12 @@ export interface MatchEvent {
   type: string;
   minute?: number;
   team?: "home" | "away";
+  /** Display name when the provider sends a team string (e.g. TheSportsDB strTeam). */
+  teamName?: string;
   player?: string;
+  /** TxLINE PlayerId / normativeId — resolved via live.playerDirectory. */
+  playerId?: string;
+  assist?: string;
   detail?: string;
 }
 

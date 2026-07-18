@@ -281,6 +281,10 @@ function headToHeadFixtures(input: ForecastInput, history: Fixture[]): Fixture[]
 }
 
 function elapsedMinute(input: ForecastInput): number | null {
+  const seconds = input.live?.clockSeconds;
+  if (typeof seconds === "number" && Number.isFinite(seconds) && seconds >= 0) {
+    return clamp(Math.floor(seconds / 60), 0, 120);
+  }
   const raw = input.live?.clock;
   if (raw) {
     const parsed = Number.parseInt(String(raw).match(/\d+/)?.[0] || "", 10);
@@ -294,6 +298,43 @@ function elapsedMinute(input: ForecastInput): number | null {
     if (/half.?time|\bht\b/i.test(period)) return 45;
   }
   return null;
+}
+
+/** Derive model phase from fixture + live tape (TxLINE often leaves status="scheduled"). */
+export function resolveForecastPhase(input: ForecastInput): MatchModelForecast["phase"] {
+  const live = input.live;
+  const score = input.fixture.score ||
+    (live
+      ? { home: live.homeScore, away: live.awayScore }
+      : undefined);
+
+  if (
+    input.fixture.status === "finished" ||
+    live?.status === "finished" ||
+    live?.statusId === 100
+  ) {
+    return score ? "final" : "pre_match";
+  }
+
+  if (input.fixture.status === "live" || live?.status === "live") {
+    return "live";
+  }
+
+  if (live?.statusId != null && live.statusId > 1 && live.statusId < 100) {
+    return "live";
+  }
+
+  if (
+    live?.events?.some((event) =>
+      ["goal", "penalty", "kickoff", "substitution", "yellow_card", "red_card"].includes(
+        event.type
+      )
+    )
+  ) {
+    return "live";
+  }
+
+  return "pre_match";
 }
 
 function freshnessStatus(
@@ -570,12 +611,7 @@ export function buildDeterministicForecast(
     },
   ];
 
-  const phase: MatchModelForecast["phase"] =
-    input.fixture.status === "finished" && input.fixture.score
-      ? "final"
-      : input.fixture.status === "live"
-        ? "live"
-        : "pre_match";
+  const phase = resolveForecastPhase(input);
   const minute = phase === "live" ? elapsedMinute(input) : null;
   const evidence: ForecastEvidence[] = [];
 
@@ -645,8 +681,8 @@ export function buildDeterministicForecast(
     });
   } else if (phase === "live") {
     const score = input.fixture.score || {
-      home: input.live?.homeScore || 0,
-      away: input.live?.awayScore || 0,
+      home: input.live?.homeScore ?? 0,
+      away: input.live?.awayScore ?? 0,
     };
     const remaining = minute === null ? 0.5 : clamp((90 - minute) / 90, 0, 1);
     homeLambda *= remaining;
@@ -902,8 +938,10 @@ function modelFingerprint(input: ForecastInput, now: number): string {
               homeScore: input.live.homeScore,
               awayScore: input.live.awayScore,
               status: input.live.status,
+              statusId: input.live.statusId,
               period: input.live.period,
               clock: input.live.clock,
+              clockSeconds: input.live.clockSeconds,
               ts: input.live.ts,
             }
           : null,

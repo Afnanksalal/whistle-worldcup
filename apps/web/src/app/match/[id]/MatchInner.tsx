@@ -21,6 +21,11 @@ import { ForecastPanel } from "../../../components/ForecastPanel";
 import { SettlementReceiptCard } from "../../../components/SettlementReceiptCard";
 import type { MatchDetail } from "../../../lib/match-detail";
 import { useSolanaTransactions } from "../../../lib/solana";
+import {
+  filterMatchEventTape,
+  formatMatchEventMeta,
+  preferRicherEventTape,
+} from "../../../lib/matchEvents";
 
 const OUTCOME_LABELS: Record<string, string> = {
   home: "Home",
@@ -433,35 +438,50 @@ export default function MatchPageInner({
             />
           )}
 
-          {(fixture.status === "live" || (live?.events && live.events.length > 0)) && (
+          {(fixture.status === "live" ||
+            (live?.events && live.events.length > 0) ||
+            (data.stats?.events && data.stats.events.length > 0)) && (
             <section className="match-event-tape" aria-label="Match events">
               <div>
                 <p className="section-kicker">Live tape</p>
                 <h2>Match events</h2>
                 <p>Goals, cards, and corners from the live feed as they land.</p>
               </div>
-              {live?.events?.length ? (
-                <ol className="event-tape-list">
-                  {[...live.events].reverse().map((event, index) => (
-                    <li key={`${event.type}-${event.minute}-${event.player}-${index}`}>
-                      <span className="mono">{event.minute != null ? `${event.minute}'` : "—"}</span>
-                      <strong>{event.type.replace(/_/g, " ")}</strong>
+              {(() => {
+                const tape = filterMatchEventTape(
+                  preferRicherEventTape(data.stats?.events, live?.events)
+                );
+                const homeLabel = fixture.home.shortName || fixture.home.name;
+                const awayLabel = fixture.away.shortName || fixture.away.name;
+                if (!tape.length) {
+                  return (
+                    <div className="reference-empty">
+                      <strong>Waiting for the next event</strong>
                       <span>
-                        {[event.team, event.player, event.detail].filter(Boolean).join(" · ")}
+                        {meta.fixtureSource === "txline" || meta.txlineConfigured
+                          ? "The tape fills as TxLINE score actions arrive."
+                          : "The tape fills as live match events arrive."}
                       </span>
-                    </li>
-                  ))}
-                </ol>
-              ) : (
-                <div className="reference-empty">
-                  <strong>Waiting for the next event</strong>
-                  <span>
-                    {meta.fixtureSource === "txline" || meta.txlineConfigured
-                      ? "The tape fills as TxLINE score actions arrive."
-                      : "The tape fills as live match events arrive."}
-                  </span>
-                </div>
-              )}
+                    </div>
+                  );
+                }
+                return (
+                  <ol className="event-tape-list">
+                    {[...tape].reverse().map((event, index) => {
+                      const metaLine = formatMatchEventMeta(event, homeLabel, awayLabel);
+                      return (
+                        <li key={`${event.type}-${event.minute}-${event.player}-${index}`}>
+                          <span className="mono">
+                            {event.minute != null ? `${event.minute}'` : "—"}
+                          </span>
+                          <strong>{event.type.replace(/_/g, " ")}</strong>
+                          {metaLine ? <span>{metaLine}</span> : null}
+                        </li>
+                      );
+                    })}
+                  </ol>
+                );
+              })()}
             </section>
           )}
 
