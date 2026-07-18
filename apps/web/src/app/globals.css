@@ -526,15 +526,20 @@ h3,
 .wallet-connect-modal {
   position: fixed;
   inset: 0;
-  z-index: 120;
-  display: grid;
-  place-items: end center;
-  padding: 1rem;
+  z-index: 220;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding: 0;
+  /* Keep page from stealing vertical swipes while the sheet is open */
+  touch-action: none;
 }
 
 @media (min-width: 640px) {
   .wallet-connect-modal {
-    place-items: center;
+    align-items: center;
+    padding: 1rem;
+    touch-action: auto;
   }
 }
 
@@ -544,27 +549,40 @@ h3,
   border: 0;
   background: rgba(6, 20, 14, 0.55);
   cursor: pointer;
+  touch-action: none;
 }
 
 .wallet-connect-panel {
   position: relative;
   z-index: 1;
+  display: flex;
+  flex-direction: column;
   width: min(100%, 24rem);
-  max-height: min(88vh, 36rem);
-  overflow: auto;
-  padding: 1.1rem 1rem 1rem;
+  max-height: min(88dvh, 36rem);
+  overflow: hidden;
+  padding: 1.1rem 0 0;
   border: 1px solid var(--line);
-  border-radius: 1rem 1rem 0.75rem 0.75rem;
+  border-radius: 1rem 1rem 0 0;
   background: var(--surface, #fbfcf8);
   box-shadow: 0 24px 64px rgba(6, 20, 14, 0.28);
+  touch-action: pan-y;
+}
+
+@media (min-width: 640px) {
+  .wallet-connect-panel {
+    border-radius: 1rem;
+    max-height: min(85vh, 36rem);
+  }
 }
 
 .wallet-connect-header {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  margin-bottom: 0.55rem;
+  margin: 0;
+  padding: 0 1rem 0.55rem;
 }
 
 .wallet-connect-header h2 {
@@ -585,7 +603,9 @@ h3,
 }
 
 .wallet-connect-note {
-  margin: 0 0 0.85rem;
+  flex: none;
+  margin: 0;
+  padding: 0 1rem 0.85rem;
   color: var(--mute);
   font-size: 0.8rem;
   line-height: 1.45;
@@ -594,9 +614,21 @@ h3,
 .wallet-connect-list {
   display: grid;
   gap: 0.45rem;
+  flex: 1 1 auto;
+  min-height: 0;
   margin: 0;
-  padding: 0;
+  padding: 0 1rem max(1rem, env(safe-area-inset-bottom));
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;
   list-style: none;
+}
+
+body.wallet-modal-open {
+  overflow: hidden !important;
+  overscroll-behavior: none;
 }
 
 .wallet-connect-option {
