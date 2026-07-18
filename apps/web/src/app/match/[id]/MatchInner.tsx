@@ -58,6 +58,21 @@ function friendlyStakeError(cause: unknown, stakeLabel = "units"): string {
   ) {
     return "This wallet already has a pick on the other side of this market. Add to the same outcome, or use another wallet.";
   }
+  if (/Wrong Solana cluster|elsewhere|Switch your wallet/i.test(message)) {
+    return "Wrong Solana network. Switch Phantom/Brave/Solflare to Devnet (not Mainnet), then retry. Or use Whistle Demo + Get demo USDC.";
+  }
+  if (
+    /User rejected|rejected the request|cancelled|canceled|Approval Denied/i.test(message)
+  ) {
+    return "Wallet request was rejected. Approve the transaction in your wallet to place the stake.";
+  }
+  if (
+    /Attempt to debit an account but found no record of a prior credit|insufficient funds|0x1\b/i.test(
+      message
+    )
+  ) {
+    return `Not enough demo ${stakeLabel} (or SOL for fees) on Devnet. Tap Get demo USDC, then try again.`;
+  }
   if (/Simulation failed/i.test(message) && message.length > 220) {
     return `The on-chain stake could not be simulated. Check your ${stakeLabel} balance and try again.`;
   }

@@ -366,6 +366,11 @@ h3,
   box-shadow: 0 0 0 3px rgba(47, 139, 101, 0.13);
 }
 
+.data-status.network-status.is-devnet .data-status-dot {
+  background: #3b82a0;
+  box-shadow: 0 0 0 3px rgba(59, 130, 160, 0.14);
+}
+
 .site-header.is-home:not(.is-scrolled) .data-status {
   border-color: rgba(251, 252, 248, 0.26);
   background: rgba(6, 27, 20, 0.24);
@@ -1702,7 +1707,7 @@ a.panel:hover {
 
 @media (max-width: 1100px) {
   .nav-link { padding-inline: 0.55rem; }
-  .data-status { display: none; }
+  .data-status:not(.network-status) { display: none; }
   .fixture-card {
     grid-template-columns: 6.8rem minmax(13rem, 1.2fr) minmax(13rem, 0.9fr) 6rem 1rem;
     gap: 0.75rem;

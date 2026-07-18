@@ -12,18 +12,24 @@ import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
 import { DemoWalletAdapter } from "../lib/demo-wallet";
 import { IdentityProvider } from "../lib/identity";
 import { RuntimeProvider, useRuntime } from "../lib/runtime";
+import { solanaRpcEndpoint, walletAdapterNetwork } from "../lib/solana-cluster";
 
 function WalletProviders({ children }: { children: ReactNode }) {
   const { meta } = useRuntime();
   const endpoint = useMemo(
-    () => process.env.NEXT_PUBLIC_SOLANA_RPC || "https://api.devnet.solana.com",
-    []
+    () => solanaRpcEndpoint(meta.network),
+    [meta.network]
   );
   const wallets = useMemo(() => {
-    const list: Adapter[] = [new PhantomWalletAdapter(), new SolflareWalletAdapter()];
+    const network = walletAdapterNetwork(meta.network);
+    // Solflare uses `network` for signAndSendTransaction cluster selection.
+    const list: Adapter[] = [
+      new PhantomWalletAdapter(),
+      new SolflareWalletAdapter({ network }),
+    ];
     if (meta.demoWalletEnabled) list.unshift(new DemoWalletAdapter());
     return list;
-  }, [meta.demoWalletEnabled]);
+  }, [meta.demoWalletEnabled, meta.network]);
   const onWalletError = useCallback((error: WalletError) => {
     if (process.env.NODE_ENV !== "production") {
       console.warn("Wallet connection error", error);
