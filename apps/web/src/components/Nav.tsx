@@ -137,9 +137,13 @@ export function Nav() {
             <span
               className={`data-status network-status${isDevnet ? " is-devnet" : ""}`}
               title={`Solana ${networkName} — stakes settle on this cluster`}
+              aria-label={`Solana ${networkName}`}
             >
               <span className="data-status-dot" aria-hidden />
-              Solana {networkName}
+              <span className="network-status-label-full">Solana {networkName}</span>
+              <span className="network-status-label-short" aria-hidden>
+                {networkName}
+              </span>
             </span>
             <span className={`data-status${dataIsLive ? " is-live" : " is-preview"}`}>
               <span className="data-status-dot" aria-hidden />
