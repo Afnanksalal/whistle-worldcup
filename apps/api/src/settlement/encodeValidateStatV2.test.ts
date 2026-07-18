@@ -54,4 +54,54 @@ describe("encodeValidateStatV2", () => {
       /does not match settle score/
     );
   });
+
+  it("accepts IDL-shaped stats field name in the encodable precheck", () => {
+    const fixture = loadFixture();
+    const root = fixture.validation as Record<string, unknown>;
+    const { statsToProve, ...rest } = root;
+    assert.equal(
+      validationHasEncodableProof({ ...rest, stats: statsToProve }),
+      true
+    );
+  });
+
+  it("rejects proofs whose first leaves are not goal keys 1/2", () => {
+    const fixture = loadFixture();
+    const root = structuredClone(fixture.validation) as {
+      statsToProve: Array<{ key: number; value: number; period?: number }>;
+      statProofs: unknown[];
+    };
+    // Unrelated first leaves with values matching the settle scores.
+    root.statsToProve = [
+      { key: 99, value: fixture.homeScore, period: 0 },
+      { key: 98, value: fixture.awayScore, period: 0 },
+      ...root.statsToProve,
+    ];
+    root.statProofs = [root.statProofs[0], root.statProofs[1], ...root.statProofs];
+    assert.equal(validationHasEncodableProof(root), true);
+    // Encoding still binds to keys 1/2 (present later), not the decoy leaves.
+    const encoded = buildValidateStatV2IxData(root, {
+      homeScore: fixture.homeScore,
+      awayScore: fixture.awayScore,
+    });
+    assert.ok(encoded.length > 8);
+
+    const onlyDecoys = {
+      ...root,
+      statsToProve: [
+        { key: 99, value: fixture.homeScore, period: 0 },
+        { key: 98, value: fixture.awayScore, period: 0 },
+      ],
+      statProofs: root.statProofs.slice(0, 2),
+    };
+    assert.equal(validationHasEncodableProof(onlyDecoys), false);
+    assert.throws(
+      () =>
+        buildValidateStatV2IxData(onlyDecoys, {
+          homeScore: fixture.homeScore,
+          awayScore: fixture.awayScore,
+        }),
+      /missing home\/away goal stats/
+    );
+  });
 });

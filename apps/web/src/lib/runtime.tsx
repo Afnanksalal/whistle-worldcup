@@ -27,7 +27,8 @@ export type AppMeta = {
   demoWalletEnabled?: boolean;
 };
 
-const META_CACHE_KEY = "whistle.runtime.meta";
+/** Presentation-only cache — never restore program/mint/cluster for txs. */
+const STAKE_LABEL_CACHE_KEY = "whistle.runtime.stakeAsset";
 
 const defaultMeta: AppMeta = {
   mode: "live",
@@ -44,23 +45,31 @@ const defaultMeta: AppMeta = {
   demoWalletEnabled: false,
 };
 
-function readCachedMeta(): AppMeta | null {
+function readCachedStakeAsset(): AppMeta["stakeAsset"] | null {
   if (typeof window === "undefined") return null;
   try {
-    const raw = sessionStorage.getItem(META_CACHE_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<AppMeta>;
-    if (parsed.stakeAsset !== "USDC" && parsed.stakeAsset !== "units") return null;
-    return { ...defaultMeta, ...parsed };
+    const raw = sessionStorage.getItem(STAKE_LABEL_CACHE_KEY);
+    if (raw === "USDC" || raw === "units") return raw;
+    // Migrate older full-meta cache if present, then drop it.
+    const legacy = sessionStorage.getItem("whistle.runtime.meta");
+    if (legacy) {
+      sessionStorage.removeItem("whistle.runtime.meta");
+      const parsed = JSON.parse(legacy) as { stakeAsset?: string };
+      if (parsed.stakeAsset === "USDC" || parsed.stakeAsset === "units") {
+        sessionStorage.setItem(STAKE_LABEL_CACHE_KEY, parsed.stakeAsset);
+        return parsed.stakeAsset;
+      }
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
-function writeCachedMeta(meta: AppMeta) {
+function writeCachedStakeAsset(stakeAsset: AppMeta["stakeAsset"]) {
   if (typeof window === "undefined") return;
   try {
-    sessionStorage.setItem(META_CACHE_KEY, JSON.stringify(meta));
+    sessionStorage.setItem(STAKE_LABEL_CACHE_KEY, stakeAsset);
   } catch {
     // ignore quota / private mode
   }
@@ -89,9 +98,9 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    const cached = readCachedMeta();
+    const cached = readCachedStakeAsset();
     if (cached) {
-      setMeta(cached);
+      setMeta((prev) => ({ ...prev, stakeAsset: cached }));
       setLoading(false);
     }
   }, []);
@@ -100,7 +109,7 @@ export function RuntimeProvider({ children }: { children: ReactNode }) {
     try {
       const m = await api<AppMeta>("/meta");
       setMeta(m);
-      writeCachedMeta(m);
+      writeCachedStakeAsset(m.stakeAsset);
     } catch {
       // keep last known
     } finally {

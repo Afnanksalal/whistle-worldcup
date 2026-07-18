@@ -3,8 +3,9 @@ import { useConnection, useWallet } from "@solana/wallet-adapter-react";
 import {
   PublicKey,
   SystemProgram,
-  Transaction,
   TransactionInstruction,
+  TransactionMessage,
+  VersionedTransaction,
 } from "@solana/web3.js";
 import {
   amountToBaseUnits,
@@ -124,10 +125,14 @@ export function useSolanaTransactions() {
         const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash(
           "confirmed"
         );
-        const transaction = new Transaction({
-          feePayer: publicKey,
+        // v0 messages — Mobile Wallet Adapter (Phantom/Solflare MWA) cannot sign
+        // legacy Transaction objects that the adapter pre-serializes unsigned.
+        const message = new TransactionMessage({
+          payerKey: publicKey,
           recentBlockhash: blockhash,
-        }).add(instruction);
+          instructions: [instruction],
+        }).compileToV0Message();
+        const transaction = new VersionedTransaction(message);
 
         // Sign in-wallet, then broadcast on OUR Connection (devnet).
         const signed = await signTransaction(transaction);
