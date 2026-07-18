@@ -59,7 +59,7 @@ function friendlyStakeError(cause: unknown, stakeLabel = "units"): string {
     return "This wallet already has a pick on the other side of this market. Add to the same outcome, or use another wallet.";
   }
   if (/Wrong Solana cluster|elsewhere|Switch your wallet/i.test(message)) {
-    return "Wrong Solana network. Switch Phantom/Brave/Solflare to Devnet (not Mainnet), then retry. Or use Whistle Demo + Get demo USDC.";
+    return "Wrong Solana network. Switch your wallet to Devnet (not Mainnet), then retry. Or use Whistle Demo + Get demo USDC.";
   }
   if (
     /User rejected|rejected the request|cancelled|canceled|Approval Denied/i.test(message)

@@ -11,17 +11,20 @@ import {
   WalletProvider,
 } from "@solana/wallet-adapter-react";
 import { WalletModalProvider } from "@solana/wallet-adapter-react-ui";
-import { SolflareWalletAdapter } from "@solana/wallet-adapter-solflare";
+import {
+  createBackpackBrowseAdapter,
+  createPhantomBrowseAdapter,
+  createSolflareBrowseAdapter,
+} from "../lib/browse-wallet-adapter";
 import { DemoWalletAdapter } from "../lib/demo-wallet";
 import { IdentityProvider } from "../lib/identity";
-import { PhantomBrowseWalletAdapter } from "../lib/phantom-browse-adapter";
 import { RuntimeProvider, useRuntime } from "../lib/runtime";
-import { solanaRpcEndpoint, walletAdapterNetwork } from "../lib/solana-cluster";
+import { solanaRpcEndpoint } from "../lib/solana-cluster";
 import {
-  createDevnetMobileWalletAdapter,
-  isMobileWebBrowser,
-  openPhantomBrowse,
-} from "../lib/wallet-mobile";
+  lastWalletLaunch,
+  launchWalletDeepLink,
+} from "../lib/wallet-deeplinks";
+import { createDevnetMobileWalletAdapter, isMobileWebBrowser } from "../lib/wallet-mobile";
 
 function WalletProviders({ children }: { children: ReactNode }) {
   const { meta } = useRuntime();
@@ -30,7 +33,6 @@ function WalletProviders({ children }: { children: ReactNode }) {
     [meta.network]
   );
   const wallets = useMemo(() => {
-    const network = walletAdapterNetwork(meta.network);
     const list: Adapter[] = [];
 
     if (meta.demoWalletEnabled) {
@@ -41,23 +43,23 @@ function WalletProviders({ children }: { children: ReactNode }) {
     const mobile = createDevnetMobileWalletAdapter(meta.network);
     if (mobile) list.push(mobile);
 
-    list.push(new PhantomBrowseWalletAdapter());
-    list.push(new SolflareWalletAdapter({ network }));
+    // Browse-capable wallets: mobile opens the correct in-app browser UL.
+    list.push(createPhantomBrowseAdapter());
+    list.push(createSolflareBrowseAdapter());
+    list.push(createBackpackBrowseAdapter());
     return list;
   }, [meta.demoWalletEnabled, meta.network]);
 
   const onWalletError = useCallback((error: WalletError) => {
     console.warn("Wallet connection error", error);
     if (!(error instanceof WalletNotReadyError)) return;
-    if (isMobileWebBrowser()) {
-      openPhantomBrowse();
+
+    const remembered = lastWalletLaunch();
+    if (launchWalletDeepLink(remembered, { preferInstall: !isMobileWebBrowser() })) {
       return;
     }
-    // Desktop: send users to the wallet homepage instead of a no-op.
-    const target = /solflare/i.test(error.message || "")
-      ? "https://solflare.com/"
-      : "https://phantom.app/";
-    window.open(target, "_blank", "noopener,noreferrer");
+    // Fallback: Phantom browse on mobile, else Phantom install page.
+    launchWalletDeepLink("Phantom", { preferInstall: !isMobileWebBrowser() });
   }, []);
 
   return (
