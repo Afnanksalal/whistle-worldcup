@@ -3,10 +3,18 @@ import {
   SEO_FIXTURE_ID,
   seoArticle,
   seoFixture,
+  seoFixtureKickoffTs,
   seoGroup,
   seoMarket,
   seoMeta,
 } from "./seo-smoke-data.mjs";
+
+function liveSeoFixture() {
+  return {
+    ...seoFixture,
+    kickoffTs: seoFixtureKickoffTs(),
+  };
+}
 
 const host = "127.0.0.1";
 const rawPort = Number(process.env.SEO_FIXTURE_PORT || 4010);
@@ -49,7 +57,7 @@ const server = createServer((request, response) => {
   }
   if (url.pathname === "/api/fixtures") {
     send(response, 200, {
-      fixtures: [seoFixture],
+      fixtures: [liveSeoFixture()],
       serverNow: Date.now(),
       meta: seoMeta,
     });
@@ -60,7 +68,11 @@ const server = createServer((request, response) => {
     return;
   }
   if (url.pathname === "/api/groups") {
-    send(response, 200, { groups: [seoGroup], rounds: ["Semi-final"] });
+    const fixture = liveSeoFixture();
+    send(response, 200, {
+      groups: [{ ...seoGroup, fixtures: [fixture] }],
+      rounds: ["Semi-final"],
+    });
     return;
   }
   if (url.pathname === "/api/news") {
@@ -81,7 +93,7 @@ const server = createServer((request, response) => {
       return;
     }
     send(response, 200, {
-      fixture: seoFixture,
+      fixture: liveSeoFixture(),
       serverNow: Date.now(),
       live: null,
       odds: [],

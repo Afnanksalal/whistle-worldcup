@@ -4,12 +4,17 @@ export const SEO_HOME_TEAM = "France";
 export const SEO_AWAY_TEAM = "Spain";
 export const SEO_ARTICLE_TITLE = "SEO Smoke: France and Spain prepare for kickoff";
 
+/** Keep kickoff in the future so home "Next" SSR always includes this fixture. */
+export function seoFixtureKickoffTs(now = Date.now()): number {
+  return now + 3 * 24 * 60 * 60 * 1000;
+}
+
 export const seoFixture = {
   id: SEO_FIXTURE_ID,
   competition: "FIFA World Cup 2026",
   round: "Semi-final",
   group: "Group S",
-  kickoffTs: Date.UTC(2026, 6, 18, 19, 0, 0),
+  kickoffTs: seoFixtureKickoffTs(),
   status: "scheduled",
   home: {
     id: "seo-france",
