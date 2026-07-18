@@ -9,8 +9,8 @@
  *   - SOLANA_RPC_URL
  *
  * Usage:
- *   node scripts/settle-market.js --fixture <id> --type match_result --home 2 --away 1
- *   node scripts/settle-market.js --fixture <id> --type totals --line 2.5 --home 1 --away 2
+ *   node scripts/settle-market.js --fixture <id> --home 2 --away 1 \
+ *     --proof-file ./validate_stat_v2.bin --daily-scores-pda <pubkey> --validation-confirmed
  */
 
 import "dotenv/config";
@@ -81,10 +81,18 @@ async function main() {
   const squadId    = getArg("--squad");
   const homeScore  = parseInt(getArg("--home") || "0", 10);
   const awayScore  = parseInt(getArg("--away") || "0", 10);
+  const proofFile  = getArg("--proof-file");
+  const dailyPda   = getArg("--daily-scores-pda");
+  const txoracle   = getArg("--txoracle") || "6pW64gN1s2uqjHkn1unFeEjAwJkPGHoppGvS715wyP2J";
 
-  if (!fixtureId || !process.argv.includes("--validation-confirmed")) {
-    console.error("Usage: node scripts/settle-market.js --fixture <id> --home <score> --away <score> --validation-confirmed [--type total_goals --line 2.5] [--squad <id>]");
+  if (!fixtureId || !proofFile || !dailyPda || !process.argv.includes("--validation-confirmed")) {
+    console.error(
+      "Usage: node scripts/settle-market.js --fixture <id> --home <n> --away <n> --proof-file <validate_stat_v2.bin> --daily-scores-pda <pubkey> --validation-confirmed [--type total_goals --line 2.5]"
+    );
     process.exit(1);
+  }
+  if (!fs.existsSync(proofFile)) {
+    throw new Error(`proof file not found: ${proofFile}`);
   }
   if (![homeScore, awayScore].every((score) => Number.isInteger(score) && score >= 0 && score <= 255)) {
     throw new Error("Scores must be integers from 0 to 255");
@@ -109,19 +117,28 @@ async function main() {
   console.log(`Score      : ${homeScore} – ${awayScore}`);
   console.log("─────────────────────────────────────────────");
 
-  // settle(home_score: u8, away_score: u8, _validation_ok: bool)
+  const proofIxData = fs.readFileSync(proofFile);
+  if (!proofIxData.length) throw new Error("proof file is empty");
+  const proofLen = Buffer.alloc(4);
+  proofLen.writeUInt32LE(proofIxData.length, 0);
+
+  // settle(home, away, validation_ok=true, proof_ix_data)
   const disc = discriminator("settle");
   const data = Buffer.concat([
     disc,
-    Buffer.from([homeScore, awayScore, 1]), // 1 = validation_ok true
+    Buffer.from([homeScore, awayScore, 1]),
+    proofLen,
+    proofIxData,
   ]);
 
   const ix = new TransactionInstruction({
     programId,
     keys: [
-      { pubkey: authority.publicKey, isSigner: true, isWritable: false }, // authority
-      { pubkey: configPda, isSigner: false, isWritable: false },           // config
-      { pubkey: marketPda, isSigner: false, isWritable: true },            // market
+      { pubkey: authority.publicKey, isSigner: true, isWritable: false },
+      { pubkey: configPda, isSigner: false, isWritable: false },
+      { pubkey: marketPda, isSigner: false, isWritable: true },
+      { pubkey: new PublicKey(txoracle), isSigner: false, isWritable: false },
+      { pubkey: new PublicKey(dailyPda), isSigner: false, isWritable: false },
     ],
     data,
   });

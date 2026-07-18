@@ -12,6 +12,9 @@ describe("keeper settlement policy", () => {
       "TxLINE result verification unavailable",
       "TxLINE final record unavailable",
       "TxLINE validation unavailable",
+      "TxLINE validation missing encodable Merkle proof",
+      "on-chain Merkle root not verified yet",
+      "validate_stat_v2 proof could not be encoded",
       "knockout level after regulation; waiting for advancing side (ET/pens)",
       "no markets ready to settle yet",
     ];

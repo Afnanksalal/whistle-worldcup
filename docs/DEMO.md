@@ -32,7 +32,7 @@ World Cup fans want to stake with friends and get paid at full-time. Sportsbooks
 TxLINE SSE scores/odds → Whistle board
 FT → historical seq → stat-validation-v2 proof
 → daily_scores_roots PDA check → SettlementReceipt
-→ settle markets (ledger and/or USDC Anchor settle + optional validate_stat_v2 CPI)
+→ settle markets (ledger and/or USDC Anchor settle with required validate_stat_v2 CPI)
 ```
 
 ## 4. Close (30s)

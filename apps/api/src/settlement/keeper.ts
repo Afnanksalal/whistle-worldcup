@@ -17,7 +17,12 @@ import {
 } from "../txline/client";
 import { extractMerkleSummary, proofSummaryLine } from "./merkle";
 import { verifyValidationAgainstChain } from "./txlineVerify";
+import { validationHasEncodableProof } from "./encodeValidateStatV2";
 import { getLogger, markSettle } from "../observability";
+import {
+  buildSettleProofFromValidation,
+  type SettleOnchainProof,
+} from "./onchain";
 
 let txlineCfg: TxlineConfig | null = null;
 let settleEnabled = true;
@@ -206,8 +211,15 @@ export async function maybeSettleFixture(
     }
 
     merkle = extractMerkleSummary(validation, network);
-    const hasOnchainStake = fixtureMarkets.some((market) => market.totalPool > 0);
-    if (hasOnchainStake) {
+    const hasOnchainStake = fixtureMarkets.some(
+      (market) =>
+        market.totalPool > 0 &&
+        (market.marketType === "match_result" || market.marketType === "total_goals")
+    );
+    if (onchainEnabled && hasOnchainStake) {
+      if (!validationHasEncodableProof(validation)) {
+        return pending("TxLINE validation missing encodable Merkle proof");
+      }
       const chain = await verifyValidationAgainstChain(validation, {
         network,
         rpcUrl: process.env.SOLANA_RPC_URL?.trim(),
@@ -216,7 +228,12 @@ export async function maybeSettleFixture(
       if (!chain.ok) {
         log.warn(
           { fixtureId, seq, reason: chain.reason, pda: chain.dailyScoresPda },
-          "on-chain Merkle root check did not pass; settling with REST validation + receipt"
+          "on-chain Merkle root check did not pass; deferring USDC settlement"
+        );
+        return pending(
+          chain.reason?.includes("429")
+            ? "Solana RPC rate limited during proof verification"
+            : "on-chain Merkle root not verified yet"
         );
       }
     }
@@ -252,7 +269,45 @@ export async function maybeSettleFixture(
     );
   }
 
+  let onchainProof: SettleOnchainProof | undefined;
+  const needsOnchainProof =
+    onchainEnabled &&
+    fixtureMarkets.some(
+      (market) =>
+        market.totalPool > 0 &&
+        (market.marketType === "match_result" || market.marketType === "total_goals") &&
+        !(
+          knockout &&
+          canonicalHome === canonicalAway &&
+          advancingSide
+        )
+    );
+  if (needsOnchainProof) {
+    try {
+      onchainProof = buildSettleProofFromValidation(
+        validation,
+        canonicalHome,
+        canonicalAway,
+        network
+      );
+    } catch (err) {
+      log.warn({ err, fixtureId }, "failed to encode validate_stat_v2 proof");
+      return pending("validate_stat_v2 proof could not be encoded");
+    }
+  }
+
   for (const market of fixtureMarkets) {
+    if (
+      onchainEnabled &&
+      market.totalPool > 0 &&
+      market.marketType === "total_corners"
+    ) {
+      log.warn(
+        { marketId: market.id, fixtureId },
+        "on-chain corner market deferred — goal-stat proof cannot settle corners"
+      );
+      continue;
+    }
     if (
       market.marketType === "total_corners" &&
       (corners?.home == null || corners?.away == null)
@@ -277,31 +332,39 @@ export async function maybeSettleFixture(
       continue;
     }
 
-    const settled = await settleMarketVerified(
-      market.id,
-      canonicalHome,
-      canonicalAway,
-      onchainEnabled,
-      {
-        firstTeam,
-        homeCorners: corners?.home,
-        awayCorners: corners?.away,
-        advancingSide: advancingSide || undefined,
-      }
-    );
-    if (settled.settleTxSig) settleTxSig = settled.settleTxSig;
-    settledIds.push(market.id);
-    markSettle();
-    log.info(
-      {
-        marketId: market.id,
-        fixtureId,
-        marketType: market.marketType,
-        mode: onchainEnabled ? "verified-onchain" : "verified-ledger",
-        onchainProofVerified,
-      },
-      "settled market from verified TxLINE final"
-    );
+    try {
+      const settled = await settleMarketVerified(
+        market.id,
+        canonicalHome,
+        canonicalAway,
+        onchainEnabled,
+        {
+          firstTeam,
+          homeCorners: corners?.home,
+          awayCorners: corners?.away,
+          advancingSide: advancingSide || undefined,
+          onchainProof,
+        }
+      );
+      if (settled.settleTxSig) settleTxSig = settled.settleTxSig;
+      settledIds.push(market.id);
+      markSettle();
+      log.info(
+        {
+          marketId: market.id,
+          fixtureId,
+          marketType: market.marketType,
+          mode: onchainEnabled ? "verified-onchain" : "verified-ledger",
+          onchainProofVerified,
+        },
+        "settled market from verified TxLINE final"
+      );
+    } catch (err) {
+      log.warn(
+        { err, marketId: market.id, fixtureId },
+        "market settle deferred after verification"
+      );
+    }
   }
 
   if (!settledIds.length) {

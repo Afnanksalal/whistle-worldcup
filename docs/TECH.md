@@ -86,7 +86,7 @@ FIFA World Cup knockout ties cannot finish as draws (extra time / penalties deci
 
 TxLINE snapshots often omit round labels. The API infers stage from `FixtureGroupId` cohort size within a competition (large cohorts → group; 16/8/4/2/1 → R32/R16/QF/SF/Final). Transient verification failures **defer** settlement instead of voiding pools; cancelled/postponed fixtures still refund.
 
-Settlement: keeper requires TxLINE historical final + validation payload, checks `daily_scores_roots` PDA presence on Solana, stores a `SettlementReceipt`, then settles ledger and/or USDC markets. Corner markets wait for box-score stats; level knockouts wait for an advancing side. Anchor `settle` accepts optional CPI instruction bytes into TxLINE `validate_stat_v2`.
+Settlement: keeper requires TxLINE historical final + validation payload, checks `daily_scores_roots` PDA presence on Solana, encodes `validate_stat_v2` instruction bytes that bind proven home/away goal stats to the settle scores, stores a `SettlementReceipt`, then settles ledger and/or USDC markets. On-chain `settle` **requires** non-empty proof bytes + CPI return `true` (empty/soft proofs are rejected). Corner USDC markets stay pending until corner-stat proofs exist; level knockouts wait for an advancing side.
 
 Networks: **devnet** `https://txline-dev.txodds.com` or **mainnet** free tiers.
 

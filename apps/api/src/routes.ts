@@ -444,11 +444,8 @@ export function createRouter(cfg: AppConfig) {
     if (market.status !== "open" || !isFixtureStakeable(fixture)) {
       return res.status(409).json({ error: "market is closed" });
     }
-    if (
-      market.marketType !== "match_result" &&
-      market.marketType !== "total_goals" &&
-      market.marketType !== "total_corners"
-    ) {
+    // total_corners cannot hard-settle via goal-stat Merkle proofs yet.
+    if (market.marketType !== "match_result" && market.marketType !== "total_goals") {
       return res.status(409).json({
         error: "this market type settles off-chain only",
         marketType: market.marketType,
