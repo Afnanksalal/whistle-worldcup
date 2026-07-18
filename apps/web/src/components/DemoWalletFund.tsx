@@ -51,10 +51,23 @@ export function DemoWalletFund() {
         className="btn btn-secondary demo-wallet-fund-btn"
         disabled={!connected || !ready || busy}
         onClick={() => void fund()}
+        title={note || "Request demo USDC for this wallet"}
+        aria-label={busy ? "Funding demo wallet" : "Get demo USDC"}
       >
-        {busy ? "Funding…" : "Get demo USDC"}
+        {busy ? (
+          "Funding…"
+        ) : (
+          <>
+            <span className="demo-wallet-fund-label-full">Get demo USDC</span>
+            <span className="demo-wallet-fund-label-short">Demo USDC</span>
+          </>
+        )}
       </button>
-      {note && <span className="demo-wallet-fund-note">{note}</span>}
+      {note && (
+        <span className="demo-wallet-fund-note" role="status">
+          {note}
+        </span>
+      )}
     </div>
   );
 }
