@@ -424,13 +424,11 @@ export function extractClockSeconds(raw: unknown): number | undefined {
     ]);
     if (seconds != null) return seconds;
   }
-  const direct =
+  // Only true elapsed seconds — never Data.Minute (already a minute value).
+  return (
     pickNumber(o, ["clockSeconds", "ClockSeconds"]) ??
-    pickNumber(
-      (o.Data as Record<string, unknown>) || {},
-      ["Seconds", "seconds", "Minute", "minute"]
-    );
-  return direct;
+    pickNumber((o.Data as Record<string, unknown>) || {}, ["Seconds", "seconds"])
+  );
 }
 
 export function clockSecondsToMinute(seconds: number | undefined): number | undefined {

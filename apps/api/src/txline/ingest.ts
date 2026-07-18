@@ -371,16 +371,22 @@ function applyScoreUpdate(update: ReturnType<typeof normalizeScoreUpdate>) {
     }
     mergedEvents.sort((a, b) => (a.minute || 0) - (b.minute || 0));
 
-    // Lineup/meta rows omit Stats goals — keep prior score.
-    const metaOnly = Boolean(update.scoreOmitted && prev);
-    const homeScore = metaOnly ? prev!.homeScore : update.homeScore;
-    const awayScore = metaOnly ? prev!.awayScore : update.awayScore;
+    // Lineup/meta rows omit Stats goals — never invent a 0-0 scoreline.
+    const scoreOmitted = Boolean(update.scoreOmitted);
+    const homeScore = scoreOmitted
+      ? (prev?.homeScore ?? update.homeScore)
+      : update.homeScore;
+    const awayScore = scoreOmitted
+      ? (prev?.awayScore ?? update.awayScore)
+      : update.awayScore;
+    const hasKnownScore = Boolean(prev) || !scoreOmitted;
 
     s.live[update.fixtureId] = {
       ...prev,
       ...update,
       homeScore,
       awayScore,
+      scoreOmitted: hasKnownScore ? undefined : true,
       status: mergeFixtureStatus(prev?.status || "unknown", update.status),
       playerDirectory: directory,
       events: mergedEvents.length ? mergedEvents : update.events,
@@ -389,9 +395,9 @@ function applyScoreUpdate(update: ReturnType<typeof normalizeScoreUpdate>) {
     };
     const f = s.fixtures[update.fixtureId];
     if (f) {
-      if (!metaOnly) {
+      if (hasKnownScore && !scoreOmitted) {
         f.score = { home: homeScore, away: awayScore };
-      } else if (!f.score && prev) {
+      } else if (hasKnownScore && scoreOmitted && prev && !f.score) {
         f.score = { home: prev.homeScore, away: prev.awayScore };
       }
       f.status = mergeFixtureStatus(f.status, update.status);

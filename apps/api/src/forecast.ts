@@ -303,8 +303,9 @@ function elapsedMinute(input: ForecastInput): number | null {
 /** Derive model phase from fixture + live tape (TxLINE often leaves status="scheduled"). */
 export function resolveForecastPhase(input: ForecastInput): MatchModelForecast["phase"] {
   const live = input.live;
-  const score = input.fixture.score ||
-    (live
+  const score =
+    input.fixture.score ||
+    (live && !live.scoreOmitted
       ? { home: live.homeScore, away: live.awayScore }
       : undefined);
 
@@ -680,10 +681,10 @@ export function buildDeterministicForecast(
       asOf: input.fixtureFeedAsOf || now,
     });
   } else if (phase === "live") {
-    const score = input.fixture.score || {
-      home: input.live?.homeScore ?? 0,
-      away: input.live?.awayScore ?? 0,
-    };
+    const score = input.fixture.score ||
+      (input.live && !input.live.scoreOmitted
+        ? { home: input.live.homeScore, away: input.live.awayScore }
+        : { home: 0, away: 0 });
     const remaining = minute === null ? 0.5 : clamp((90 - minute) / 90, 0, 1);
     homeLambda *= remaining;
     awayLambda *= remaining;

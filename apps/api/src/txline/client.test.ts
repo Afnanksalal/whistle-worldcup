@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  clockSecondsToMinute,
+  extractClockSeconds,
   extractPlayerDirectory,
   extractScoreEvents,
   formatPlayerDisplayName,
@@ -174,6 +176,24 @@ describe("TxLINE normalization safety", () => {
     assert.equal(update.scoreOmitted, true);
     assert.equal(update.playerDirectory?.["413676"], "Ousmane Dembele");
     assert.equal(update.status, "live");
+  });
+
+  it("does not treat Data.Minute as clock seconds", () => {
+    assert.equal(
+      extractClockSeconds({
+        Action: "goal",
+        Data: { Minute: 87, PlayerId: 1 },
+      }),
+      undefined
+    );
+    const events = extractScoreEvents({
+      Action: "goal",
+      Participant: 1,
+      Data: { Minute: 87, PlayerId: 1, GoalType: "Shot" },
+      Stats: { "1": 1, "2": 0 },
+    });
+    assert.equal(events[0]?.minute, 87);
+    assert.equal(clockSecondsToMinute(87), 1);
   });
 
   it("marks kickoffs older than ~2.5h as finished when TxLINE omits status", () => {

@@ -19,12 +19,22 @@ test("filters TxLINE possession noise but keeps goals and named players", () => 
   );
 });
 
-test("prefers timeline rows that include player names", () => {
+test("merges rich timeline rows with newer live-only events", () => {
   const richer = preferRicherEventTape(
     [{ type: "goal", minute: 3, team: "away", teamName: "England", player: "Declan Rice" }],
-    [{ type: "goal", detail: "goal" }, { type: "penalty", detail: "penalty" }]
+    [
+      { type: "goal", detail: "goal" },
+      { type: "penalty", minute: 86, team: "away", player: "Bukayo Saka", detail: "Scored" },
+    ]
   );
-  assert.equal(richer[0]?.player, "Declan Rice");
+  assert.equal(
+    richer.some((event) => event.player === "Declan Rice"),
+    true
+  );
+  assert.equal(
+    richer.some((event) => event.player === "Bukayo Saka"),
+    true
+  );
 });
 
 test("formats team names instead of home/away literals", () => {

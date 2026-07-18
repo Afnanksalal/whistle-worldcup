@@ -47,6 +47,25 @@ export function filterMatchEventTape(events: MatchEvent[]): MatchEvent[] {
   return filtered.length ? filtered : events;
 }
 
+function eventTapeKey(event: MatchEvent): string {
+  return [
+    event.minute ?? "",
+    event.type,
+    event.team ?? "",
+    event.playerId ?? event.player ?? "",
+    event.detail ?? "",
+  ].join("|");
+}
+
+function eventRichness(event: MatchEvent): number {
+  return (
+    (event.player ? 10 : 0) +
+    (event.teamName || event.team ? 1 : 0) +
+    (event.assist ? 2 : 0)
+  );
+}
+
+/** Merge stats + live tapes, keeping richer duplicates and new live-only rows. */
 export function preferRicherEventTape(
   primary: MatchEvent[] | undefined,
   fallback: MatchEvent[] | undefined
@@ -55,16 +74,26 @@ export function preferRicherEventTape(
   const b = fallback || [];
   if (!a.length) return b;
   if (!b.length) return a;
-  const richness = (events: MatchEvent[]) =>
-    events.reduce(
-      (score, event) =>
-        score +
-        (event.player ? 10 : 0) +
-        (event.teamName || event.team ? 1 : 0) +
-        (event.assist ? 2 : 0),
-      0
-    );
-  return richness(a) >= richness(b) ? a : b;
+
+  const byKey = new Map<string, MatchEvent>();
+  for (const event of [...a, ...b]) {
+    const key = eventTapeKey(event);
+    const existing = byKey.get(key);
+    if (!existing || eventRichness(event) > eventRichness(existing)) {
+      byKey.set(key, event);
+      continue;
+    }
+    // Same type/minute but different player identity — keep both via player suffix.
+    if (
+      existing.player !== event.player ||
+      existing.playerId !== event.playerId ||
+      existing.detail !== event.detail
+    ) {
+      byKey.set(`${key}|${byKey.size}`, event);
+    }
+  }
+
+  return [...byKey.values()].sort((left, right) => (left.minute || 0) - (right.minute || 0));
 }
 
 export function eventTeamLabel(
