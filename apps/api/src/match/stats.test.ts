@@ -59,6 +59,15 @@ test("stats polling is status-aware, deduplicated, and rate-limit safe", async (
               intTime: "12",
               strHomeAway: "Home",
             },
+            {
+              strTimeline: "Goal",
+              strTimelineDetail: "Normal Goal",
+              strPlayer: "Bukayo Saka",
+              strAssist: "Declan Rice",
+              strTeam: "England",
+              strHome: "No",
+              intTime: "37",
+            },
           ],
         });
       }
@@ -73,14 +82,38 @@ test("stats polling is status-aware, deduplicated, and rate-limit safe", async (
     await refreshMatchStats(scheduled.id);
     assert.equal(requests.length, 0, "scheduled fixtures must not poll the provider");
 
+    // TxLINE may leave fixture.status=scheduled while live tape is active.
+    mutate((state) => {
+      state.live[scheduled.id] = {
+        fixtureId: scheduled.id,
+        homeScore: 1,
+        awayScore: 0,
+        status: "scheduled",
+        statusId: 4,
+        events: [{ type: "goal", detail: "goal" }],
+        ts: Date.now(),
+      };
+    });
+    const scheduledLive = await refreshMatchStats(scheduled.id);
+    assert.equal(requests.length, 2, "in-play live tape should poll TheSportsDB timeline");
+    assert.equal(
+      scheduledLive?.events.some((event) => event.player === "Bukayo Saka"),
+      true
+    );
+
     const liveReads = await Promise.all([
       refreshMatchStats(live.id),
       refreshMatchStats(live.id),
       refreshMatchStats(live.id),
     ]);
-    assert.equal(requests.length, 2, "concurrent reads should share one request pair");
+    assert.equal(requests.length, 4, "concurrent reads should share one request pair");
     assert.strictEqual(liveReads[0], liveReads[1]);
     assert.deepEqual(liveReads[0]?.yellowCards, { home: 2, away: 1 });
+    const saka = liveReads[0]?.events.find((event) => event.player === "Bukayo Saka");
+    assert.ok(saka);
+    assert.equal(saka?.team, "away");
+    assert.equal(saka?.teamName, "England");
+    assert.equal(saka?.assist, "Declan Rice");
 
     mutate((state) => {
       state.live[live.id] = {
@@ -93,18 +126,18 @@ test("stats polling is status-aware, deduplicated, and rate-limit safe", async (
       };
     });
     const merged = await refreshMatchStats(live.id);
-    assert.equal(requests.length, 2, "TxLINE merges must not bypass the live provider TTL");
+    assert.equal(requests.length, 4, "TxLINE merges must not bypass the live provider TTL");
     assert.equal(merged?.events.some((event) => event.player === "B Player"), true);
     assert.deepEqual(merged?.redCards, { home: 0, away: 1 });
 
     await refreshMatchStats(finished.id);
     await refreshMatchStats(finished.id);
-    assert.equal(requests.length, 4, "a successful finished snapshot should be immutable");
+    assert.equal(requests.length, 6, "a successful finished snapshot should be immutable");
 
     await refreshMatchStats(limited.id);
-    assert.equal(requests.length, 6);
+    assert.equal(requests.length, 8);
     await refreshMatchStats(blocked.id);
-    assert.equal(requests.length, 6, "Retry-After should pause new calls without sleeping");
+    assert.equal(requests.length, 8, "Retry-After should pause new calls without sleeping");
     assert.equal(getState().matchStats[blocked.id]?.source, "waiting");
   } finally {
     globalThis.fetch = originalFetch;

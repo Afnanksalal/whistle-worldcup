@@ -7,9 +7,10 @@ import {
   MarketType,
   Position,
   Squad,
-  amountToBaseUnits,
+  baseUnitsToAmount,
   impliedShares,
   isKnockoutMatchResult,
+  payoutBaseUnits,
   payoutForPosition,
   resolveCorners,
   resolveFirstScorer,
@@ -510,6 +511,30 @@ export function lockMarket(marketId: string) {
   return getState().markets[marketId];
 }
 
+function settledClaimAmounts(
+  position: Position,
+  market: MarketPool,
+  feeBps: number
+) {
+  const won = position.outcome === market.winningOutcome;
+  const grossBase = won
+    ? payoutBaseUnits(
+        position.amount,
+        market.outcomes[market.winningOutcome!] || 0,
+        market.totalPool
+      )
+    : 0n;
+  // Match on-chain integer fee math: fee = floor(gross_base * bps / 10_000).
+  const feeBase =
+    feeBps > 0 && grossBase > 0n ? (grossBase * BigInt(feeBps)) / 10_000n : 0n;
+  return {
+    won,
+    grossPayout: baseUnitsToAmount(grossBase),
+    fee: baseUnitsToAmount(feeBase),
+    payout: baseUnitsToAmount(grossBase - feeBase),
+  };
+}
+
 export function claimPosition(
   positionId: string,
   owner: string,
@@ -520,42 +545,42 @@ export function claimPosition(
   const position = state.positions[positionId];
   if (!position) throw new Error("position not found");
   if (position.owner !== owner) throw new Error("not your position");
-  if (position.claimed) throw new Error("already claimed");
   const market = state.markets[position.marketId];
   if (!market) throw new Error("market not found");
 
   if (market.status === "void") {
     const payout = position.amount;
-    mutate((s) => {
-      s.positions[positionId].claimed = true;
-      s.positions[positionId].claimTxSignature = txSignature;
-    }, "claim", { positionId, payout, refund: true }, { durable: true });
-    return { position: getState().positions[positionId], payout, won: false, refund: true };
+    if (!position.claimed) {
+      mutate((s) => {
+        s.positions[positionId].claimed = true;
+        s.positions[positionId].claimTxSignature =
+          txSignature || s.positions[positionId].claimTxSignature;
+      }, "claim", { positionId, payout, refund: true }, { durable: true });
+    }
+    return {
+      position: getState().positions[positionId],
+      payout,
+      won: false,
+      refund: true,
+    };
   }
 
   if (market.status !== "settled") throw new Error("market not settled");
   if (!market.winningOutcome) throw new Error("no winning outcome");
 
-  const won = position.outcome === market.winningOutcome;
-  const grossPayout = won
-    ? payoutForPosition(
-        position.amount,
-        market.outcomes[market.winningOutcome] || 0,
-        market.totalPool
-      )
-    : 0;
-  // Match on-chain integer fee math: fee = floor(gross_base * bps / 10_000).
-  const fee =
-    feeBps > 0 && grossPayout > 0
-      ? Number((amountToBaseUnits(grossPayout) * BigInt(feeBps)) / 10_000n) /
-        1_000_000
-      : 0;
-  const payout = grossPayout - fee;
+  const { won, grossPayout, fee, payout } = settledClaimAmounts(
+    position,
+    market,
+    feeBps
+  );
 
-  mutate((s) => {
-    s.positions[positionId].claimed = true;
-    s.positions[positionId].claimTxSignature = txSignature;
-  }, "claim", { positionId, payout, grossPayout, fee }, { durable: true });
+  if (!position.claimed) {
+    mutate((s) => {
+      s.positions[positionId].claimed = true;
+      s.positions[positionId].claimTxSignature =
+        txSignature || s.positions[positionId].claimTxSignature;
+    }, "claim", { positionId, payout, grossPayout, fee }, { durable: true });
+  }
 
   return {
     position: getState().positions[positionId],

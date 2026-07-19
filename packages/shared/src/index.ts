@@ -54,8 +54,15 @@ export interface LiveScoreUpdate {
   statusId?: number;
   action?: string;
   period?: string | number;
+  /** Elapsed minute as a display string (e.g. "78"), derived from TxLINE Clock.Seconds when needed. */
   clock?: string;
+  /** Raw TxLINE clock seconds when the provider sends `{ Running, Seconds }`. */
+  clockSeconds?: number;
   events?: MatchEvent[];
+  /** PlayerId / normativeId → display name from TxLINE lineups tape. */
+  playerDirectory?: Record<string, string>;
+  /** True when this row had no Stats goals (lineups/meta) — ingest must keep prior score. */
+  scoreOmitted?: boolean;
   ts: number;
 }
 
@@ -63,7 +70,12 @@ export interface MatchEvent {
   type: string;
   minute?: number;
   team?: "home" | "away";
+  /** Display name when the provider sends a team string (e.g. TheSportsDB strTeam). */
+  teamName?: string;
   player?: string;
+  /** TxLINE PlayerId / normativeId — resolved via live.playerDirectory. */
+  playerId?: string;
+  assist?: string;
   detail?: string;
 }
 
@@ -351,13 +363,48 @@ export function impliedShares(outcomes: Record<string, number>): Record<string, 
   );
 }
 
+/** On-chain payout math: floor(position * total / winning_pool) in base units. */
+export function payoutBaseUnits(
+  positionAmount: number,
+  outcomePool: number,
+  totalPool: number,
+  decimals = 6
+): bigint {
+  if (outcomePool <= 0 || totalPool <= 0) return 0n;
+  const position = amountToBaseUnits(positionAmount, decimals);
+  const outcome = amountToBaseUnits(outcomePool, decimals);
+  const total = amountToBaseUnits(totalPool, decimals);
+  return (position * total) / outcome;
+}
+
+export function baseUnitsToAmount(baseUnits: bigint, decimals = 6): number {
+  if (baseUnits < 0n) throw new Error("base units must be non-negative");
+  if (!Number.isInteger(decimals) || decimals < 0 || decimals > 9) {
+    throw new Error("invalid token decimals");
+  }
+  return Number(baseUnits) / 10 ** decimals;
+}
+
 export function payoutForPosition(
   positionAmount: number,
   outcomePool: number,
   totalPool: number
 ): number {
-  if (outcomePool <= 0 || totalPool <= 0) return 0;
-  return (positionAmount / outcomePool) * totalPool;
+  return baseUnitsToAmount(payoutBaseUnits(positionAmount, outcomePool, totalPool));
+}
+
+/** Gross payout minus platform fee, matching on-chain floor(bps) fee math. */
+export function netPayoutForPosition(
+  positionAmount: number,
+  outcomePool: number,
+  totalPool: number,
+  feeBps = 0
+): number {
+  const gross = payoutBaseUnits(positionAmount, outcomePool, totalPool);
+  if (gross <= 0n) return 0;
+  const fee =
+    feeBps > 0 ? (gross * BigInt(feeBps)) / 10_000n : 0n;
+  return baseUnitsToAmount(gross - fee);
 }
 
 export function resolveMatchResult(

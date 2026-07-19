@@ -33,6 +33,36 @@ const DEPOSIT_DISCRIMINATOR = Buffer.from([
 const CLAIM_DISCRIMINATOR = Buffer.from([
   0x3e, 0xc6, 0xd6, 0xc1, 0xd5, 0x9f, 0x6c, 0xd2,
 ]);
+/** Anchor Position: disc(8) + owner(32) + market(32) + outcome(1) + amount(8) + claimed(1). */
+const POSITION_CLAIMED_OFFSET = 8 + 32 + 32 + 1 + 8;
+
+/** Returned when the position PDA is already claimed; ledger sync can proceed without a new tx. */
+export const ALREADY_CLAIMED_SIGNATURE = "already-claimed";
+
+function isAlreadyClaimedMessage(message: string): boolean {
+  return /AlreadyClaimed|Already claimed|Error Number:\s*6007|custom program error:\s*0x1777/i.test(
+    message
+  );
+}
+
+async function transactionErrorDetails(error: unknown): Promise<string> {
+  if (!(error instanceof Error)) return String(error || "Transaction failed");
+  const withLogs = error as Error & {
+    logs?: string[];
+    getLogs?: () => string[] | Promise<string[]>;
+  };
+  let logs = withLogs.logs;
+  if ((!logs || logs.length === 0) && typeof withLogs.getLogs === "function") {
+    try {
+      const resolved = await withLogs.getLogs();
+      if (Array.isArray(resolved)) logs = resolved;
+    } catch {
+      // Keep the original message if log fetch fails.
+    }
+  }
+  if (logs?.length) return `${withLogs.message}\n${logs.join("\n")}`;
+  return withLogs.message;
+}
 
 export function deriveConfigPDA(programId: PublicKey): PublicKey {
   return PublicKey.findProgramAddressSync([Buffer.from("whistle_config")], programId)[0];
@@ -151,23 +181,28 @@ export function useSolanaTransactions() {
       try {
         return await signAndSend();
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error || "");
+        const message = await transactionErrorDetails(error);
         if (/blockhash.*(invalid|not found|expired)|expired.*blockhash/i.test(message)) {
           // One retry with a brand-new hash (covers expiry during the approve prompt).
           try {
             return await signAndSend();
           } catch (retryError) {
-            const retryMessage =
-              retryError instanceof Error ? retryError.message : String(retryError || "");
+            const retryMessage = await transactionErrorDetails(retryError);
             if (/blockhash.*(invalid|not found|expired)|expired.*blockhash/i.test(retryMessage)) {
               throw new Error(
                 `Blockhash rejected — your wallet is probably not on Solana ${label}. In Brave/Phantom/Solflare switch the Solana network to ${label} (not Mainnet / not Ethereum), then retry. Or use Whistle Demo + Get demo USDC.`
               );
             }
-            throw retryError;
+            if (isAlreadyClaimedMessage(retryMessage)) {
+              return ALREADY_CLAIMED_SIGNATURE;
+            }
+            throw new Error(retryMessage);
           }
         }
-        throw error;
+        if (isAlreadyClaimedMessage(message)) {
+          return ALREADY_CLAIMED_SIGNATURE;
+        }
+        throw new Error(message);
       }
     },
     [assertCluster, connection, meta.network, publicKey, signTransaction]
@@ -251,6 +286,15 @@ export function useSolanaTransactions() {
         throw new Error("Whistle config account not found on-chain");
       }
       const authority = new PublicKey(configAccount.data.subarray(8, 40));
+      const positionPda = derivePositionPDA(programId, market, publicKey);
+      const positionAccount = await connection.getAccountInfo(positionPda, "confirmed");
+      if (
+        positionAccount &&
+        positionAccount.data.length > POSITION_CLAIMED_OFFSET &&
+        positionAccount.data[POSITION_CLAIMED_OFFSET] === 1
+      ) {
+        return ALREADY_CLAIMED_SIGNATURE;
+      }
       return send(
         new TransactionInstruction({
           programId,
@@ -260,7 +304,7 @@ export function useSolanaTransactions() {
             { pubkey: market, isSigner: false, isWritable: true },
             { pubkey: deriveVaultPDA(programId, market), isSigner: false, isWritable: true },
             {
-              pubkey: derivePositionPDA(programId, market, publicKey),
+              pubkey: positionPda,
               isSigner: false,
               isWritable: true,
             },

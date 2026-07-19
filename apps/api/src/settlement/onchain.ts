@@ -215,6 +215,27 @@ export async function verifyDepositTx(args: {
   throw new Error("No matching deposit instruction found in transaction");
 }
 
+/** Anchor Position: disc(8) + owner(32) + market(32) + outcome(1) + amount(8) + claimed(1). */
+const POSITION_CLAIMED_OFFSET = 8 + 32 + 32 + 1 + 8;
+
+export async function isPositionClaimedOnchain(args: {
+  connection: Connection;
+  programId: PublicKey;
+  marketPda: PublicKey;
+  user: PublicKey;
+}): Promise<boolean> {
+  const positionPda = derivePositionPDA(args.programId, args.marketPda, args.user);
+  const account = await args.connection.getAccountInfo(positionPda, "confirmed");
+  if (!account) throw new Error("position account not found on-chain");
+  if (!account.owner.equals(args.programId)) {
+    throw new Error("position PDA has an unexpected owner");
+  }
+  if (account.data.length <= POSITION_CLAIMED_OFFSET) {
+    throw new Error("position account data is truncated");
+  }
+  return account.data[POSITION_CLAIMED_OFFSET] === 1;
+}
+
 export async function verifyClaimTx(args: {
   connection: Connection;
   programId: PublicKey;

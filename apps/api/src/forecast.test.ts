@@ -142,6 +142,38 @@ describe("deterministic match forecast", () => {
       )
     );
   });
+
+  it("treats scheduled fixtures with in-play TxLINE tape as live", () => {
+    const stuck: Fixture = {
+      ...target,
+      status: "scheduled",
+      score: { home: 3, away: 5 },
+    };
+    const forecast = buildDeterministicForecast(
+      input({
+        fixture: stuck,
+        fixtures: [stuck, ...history],
+        live: {
+          fixtureId: stuck.id,
+          homeScore: 3,
+          awayScore: 5,
+          status: "scheduled",
+          statusId: 4,
+          clockSeconds: 5400,
+          events: [{ type: "goal", minute: 37, team: "away", player: "Bukayo Saka" }],
+          ts: NOW,
+        },
+      }),
+      NOW
+    );
+    assert.equal(forecast.phase, "live");
+    assert.ok(forecast.probabilities.away > forecast.probabilities.home);
+    assert.ok(
+      forecast.evidence.some(
+        (item) => item.kind === "live_score" && item.label.includes("after 90 minutes")
+      )
+    );
+  });
 });
 
 describe("forecast service boundaries", () => {

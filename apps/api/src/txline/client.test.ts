@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  clockSecondsToMinute,
+  extractClockSeconds,
+  extractPlayerDirectory,
+  extractScoreEvents,
+  formatPlayerDisplayName,
   normalizeEpochMs,
   normalizeFixture,
   normalizeScoreUpdate,
@@ -111,6 +116,84 @@ describe("TxLINE normalization safety", () => {
     });
     assert.ok(update);
     assert.equal(update.status, "unknown");
+  });
+
+  it("treats scheduled GameState + in-play statusId as live", () => {
+    const update = normalizeScoreUpdate({
+      fixtureId: "18257865",
+      GameState: "scheduled",
+      statusId: 4,
+      action: "safe_possession",
+      homeScore: 3,
+      awayScore: 5,
+    });
+    assert.ok(update);
+    assert.equal(update.status, "live");
+  });
+
+  it("resolves PlayerId via lineups directory and parses Clock.Seconds", () => {
+    assert.equal(formatPlayerDisplayName("Saka, Bukayo"), "Bukayo Saka");
+    const directory = extractPlayerDirectory({
+      Action: "lineups",
+      Data: {
+        Lineups: [
+          {
+            player: { normativeId: 1069227, preferredName: "Saka, Bukayo" },
+          },
+        ],
+      },
+    });
+    assert.equal(directory["1069227"], "Bukayo Saka");
+    const events = extractScoreEvents(
+      {
+        Action: "penalty_outcome",
+        Participant: 2,
+        StatusId: 4,
+        Clock: { Running: true, Seconds: 5202 },
+        Data: { Outcome: "Scored", PlayerId: 1069227 },
+        Stats: { "1": 3, "2": 5 },
+      },
+      directory
+    );
+    assert.equal(events[0]?.type, "penalty");
+    assert.equal(events[0]?.player, "Bukayo Saka");
+    assert.equal(events[0]?.playerId, "1069227");
+    assert.equal(events[0]?.team, "away");
+    assert.equal(events[0]?.minute, 86);
+  });
+
+  it("keeps lineup rows without scores so the roster can be stored", () => {
+    const update = normalizeScoreUpdate({
+      FixtureId: 18257865,
+      Action: "lineups",
+      GameState: "scheduled",
+      StatusId: 2,
+      Data: {
+        Lineups: [{ player: { normativeId: 413676, preferredName: "Dembele, Ousmane" } }],
+      },
+    });
+    assert.ok(update);
+    assert.equal(update.scoreOmitted, true);
+    assert.equal(update.playerDirectory?.["413676"], "Ousmane Dembele");
+    assert.equal(update.status, "live");
+  });
+
+  it("does not treat Data.Minute as clock seconds", () => {
+    assert.equal(
+      extractClockSeconds({
+        Action: "goal",
+        Data: { Minute: 87, PlayerId: 1 },
+      }),
+      undefined
+    );
+    const events = extractScoreEvents({
+      Action: "goal",
+      Participant: 1,
+      Data: { Minute: 87, PlayerId: 1, GoalType: "Shot" },
+      Stats: { "1": 1, "2": 0 },
+    });
+    assert.equal(events[0]?.minute, 87);
+    assert.equal(clockSecondsToMinute(87), 1);
   });
 
   it("marks kickoffs older than ~2.5h as finished when TxLINE omits status", () => {

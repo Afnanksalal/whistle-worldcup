@@ -5,7 +5,9 @@ import {
   impliedShares,
   isFinalScoreRecord,
   marketIdentitySeed,
+  netPayoutForPosition,
   outcomeToU8,
+  payoutBaseUnits,
   payoutForPosition,
   resolveCorners,
   resolveFirstScorer,
@@ -77,6 +79,13 @@ describe("on-chain encodings", () => {
     assert.equal(amountToBaseUnits(10.25), 10_250_000n);
     assert.throws(() => amountToBaseUnits(0.0000001), /decimal places/);
     assert.throws(() => amountToBaseUnits(0), /positive/);
+  });
+
+  it("computes claim payouts with on-chain integer math", () => {
+    // 400 / 570 * 780 — float path used to blow up amountToBaseUnits(gross).
+    assert.equal(payoutBaseUnits(400, 570, 780), 547_368_421n);
+    assert.equal(payoutForPosition(400, 570, 780), 547.368421);
+    assert.equal(netPayoutForPosition(400, 570, 780, 250), 533.684211);
   });
 
   it("rejects outcomes from the wrong market type", () => {

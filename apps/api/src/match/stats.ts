@@ -1,4 +1,5 @@
 import type { Fixture, MatchEvent, MatchStats } from "@whistle/shared";
+import { getCachedMatchInfo } from "../fixtures/matchContext";
 import { getState, mutate } from "../store";
 import { getLogger } from "../observability";
 
@@ -93,9 +94,13 @@ type TimelineRow = {
   strTimeline?: string;
   strTimelineDetail?: string;
   strPlayer?: string;
+  strAssist?: string;
   strEvent?: string;
+  strTeam?: string;
   intTime?: string;
+  /** Older docs used strHomeAway; live TheSportsDB rows use strHome Yes/No. */
   strHomeAway?: string;
+  strHome?: string;
 };
 
 type EventStatRow = {
@@ -113,10 +118,17 @@ function sidePair(home: number, away: number) {
 }
 
 function teamSide(raw?: string): "home" | "away" | undefined {
-  const s = (raw || "").toLowerCase();
+  const s = (raw || "").toLowerCase().trim();
+  if (!s) return undefined;
+  if (s === "yes" || s === "y" || s === "true" || s === "1") return "home";
+  if (s === "no" || s === "n" || s === "false" || s === "0") return "away";
   if (s.startsWith("h") || s === "home") return "home";
   if (s.startsWith("a") || s === "away") return "away";
   return undefined;
+}
+
+function timelineTeamSide(row: TimelineRow): "home" | "away" | undefined {
+  return teamSide(row.strHomeAway) ?? teamSide(row.strHome);
 }
 
 function classifyEvent(label: string): string {
@@ -154,7 +166,9 @@ function tsdbId(fixture: Fixture): string | null {
     | { idEvent?: string; tsdbEventId?: string }
     | undefined;
   if (raw?.tsdbEventId) return String(raw.tsdbEventId);
-  return raw?.idEvent ? String(raw.idEvent) : null;
+  if (raw?.idEvent) return String(raw.idEvent);
+  const fromInfo = getCachedMatchInfo(fixture.id)?.tsdbEventId;
+  return fromInfo ? String(fromInfo) : null;
 }
 
 function parseIntSafe(v?: string): number {
@@ -189,12 +203,20 @@ async function fetchTimeline(
   const events: MatchEvent[] = [];
   for (const row of response.value.timeline || []) {
     const label = row.strTimeline || row.strEvent || row.strTimelineDetail || "event";
+    const detailParts = [
+      row.strTimelineDetail && row.strTimelineDetail !== label
+        ? row.strTimelineDetail
+        : undefined,
+      row.strAssist ? `assist ${row.strAssist}` : undefined,
+    ].filter(Boolean);
     events.push({
       type: classifyEvent(label),
       minute: row.intTime ? Number(row.intTime) : undefined,
-      team: teamSide(row.strHomeAway),
+      team: timelineTeamSide(row),
+      teamName: row.strTeam || undefined,
       player: row.strPlayer || undefined,
-      detail: row.strTimelineDetail || label,
+      assist: row.strAssist || undefined,
+      detail: detailParts.length ? detailParts.join(" · ") : label,
     });
   }
   return {
@@ -303,12 +325,23 @@ function applyProviderStats(
   if (provider.offsides) stats.offsides = provider.offsides;
 }
 
+function isInPlayForStats(fixture: Fixture): boolean {
+  if (fixture.status === "live") return true;
+  // TxLINE often keeps GameState="scheduled" on live rows; treat active live
+  // score tape as in-play so TheSportsDB timeline (player names) still refreshes.
+  const live = getState().live[fixture.id];
+  if (!live) return false;
+  if (live.status === "live") return true;
+  if (live.statusId != null && live.statusId !== 100 && live.statusId > 1) return true;
+  return Boolean(live.events?.some((event) => event.type === "goal" || event.type === "penalty"));
+}
+
 function providerRefreshDue(
   fixture: Fixture,
   state: ProviderPollState,
   now: number
 ): boolean {
-  if (fixture.status === "live") {
+  if (isInPlayForStats(fixture)) {
     return !state.lastLiveAttemptAt || now - state.lastLiveAttemptAt >= LIVE_PROVIDER_TTL_MS;
   }
   if (fixture.status === "finished") {
@@ -326,7 +359,7 @@ function markProviderAttempt(
   state: ProviderPollState,
   now: number
 ) {
-  if (fixture.status === "live") state.lastLiveAttemptAt = now;
+  if (isInPlayForStats(fixture)) state.lastLiveAttemptAt = now;
   if (fixture.status === "finished") state.lastFinishedAttemptAt = now;
 }
 
@@ -438,7 +471,7 @@ export async function refreshLiveFixtureStats() {
   const fixtures = Object.values(getState().fixtures);
   const now = Date.now();
   const ordered = [
-    ...fixtures.filter((f) => f.status === "live").slice(0, 6),
+    ...fixtures.filter((f) => isInPlayForStats(f)).slice(0, 6),
     ...fixtures
       .filter(
         (f) =>
