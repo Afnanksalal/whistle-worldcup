@@ -28,6 +28,7 @@ import { Connection, PublicKey } from "@solana/web3.js";
 import {
   deriveMarketPDA,
   ensureMarketOnchain,
+  isPositionClaimedOnchain,
   verifyClaimTx,
   verifyDepositTx,
 } from "./settlement/onchain";
@@ -615,9 +616,6 @@ export function createRouter(cfg: AppConfig) {
       if (!market) return res.status(404).json({ error: "market not found" });
 
       if (cfg.onchainSettlementEnabled) {
-        if (!parsed.data.txSignature) {
-          return res.status(400).json({ error: "txSignature required for on-chain claim" });
-        }
         const connection = new Connection(cfg.solanaRpcUrl, "confirmed");
         const programId = new PublicKey(cfg.whistleProgramId!);
         const marketPda = deriveMarketPDA(
@@ -629,13 +627,29 @@ export function createRouter(cfg: AppConfig) {
         );
         const userPubKey = new PublicKey(parsed.data.owner);
 
-        await verifyClaimTx({
-          connection,
-          programId,
-          txSig: parsed.data.txSignature,
-          expectedMarket: marketPda,
-          expectedUser: userPubKey,
-        });
+        if (parsed.data.txSignature) {
+          await verifyClaimTx({
+            connection,
+            programId,
+            txSig: parsed.data.txSignature,
+            expectedMarket: marketPda,
+            expectedUser: userPubKey,
+          });
+        } else {
+          // Chain claim can succeed while ledger sync fails (e.g. float fee math).
+          // Allow a signature-less sync once the position PDA is already claimed.
+          const claimedOnchain = await isPositionClaimedOnchain({
+            connection,
+            programId,
+            marketPda,
+            user: userPubKey,
+          });
+          if (!claimedOnchain) {
+            return res
+              .status(400)
+              .json({ error: "txSignature required for on-chain claim" });
+          }
+        }
       }
 
       res.json(

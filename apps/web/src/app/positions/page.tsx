@@ -3,14 +3,14 @@
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { Fixture, MarketPool, Position } from "@whistle/shared";
-import { payoutForPosition } from "@whistle/shared";
+import { netPayoutForPosition } from "@whistle/shared";
 import { api, shortAddr } from "../../lib/api";
 import { useIdentity } from "../../lib/identity";
 import { formatCalendarDate, useLocalTimeContext } from "../../lib/local-time";
 import { useRuntime } from "../../lib/runtime";
 import { BrandMark } from "../../components/BrandMark";
 import { FootballLoader } from "../../components/FootballLoader";
-import { useSolanaTransactions } from "../../lib/solana";
+import { ALREADY_CLAIMED_SIGNATURE, useSolanaTransactions } from "../../lib/solana";
 
 type PosRow = Position & { market?: MarketPool; fixture?: Fixture };
 type View = "active" | "ready" | "history";
@@ -28,12 +28,12 @@ function payout(position: PosRow, feeBps = 0) {
   if (!market) return 0;
   if (market.status === "void") return position.amount;
   if (market.status !== "settled" || market.winningOutcome !== position.outcome) return 0;
-  const gross = payoutForPosition(
+  return netPayoutForPosition(
     position.amount,
     market.outcomes[market.winningOutcome] || 0,
-    market.totalPool
+    market.totalPool,
+    feeBps
   );
-  return gross * (1 - feeBps / 10_000);
 }
 
 export default function PositionsPage() {
@@ -117,6 +117,10 @@ export default function PositionsPage() {
           line: position.market.line,
           squadId: position.market.squadId,
         });
+        if (txSignature === ALREADY_CLAIMED_SIGNATURE) {
+          // Funds already left the vault — sync the ledger without a new signature.
+          txSignature = undefined;
+        }
       }
 
       const response = await api<{

@@ -87,3 +87,40 @@ describe("on-chain deposit ledger alignment", () => {
     assert.equal(store.getState().markets.market.totalPool, 15);
   });
 });
+
+describe("claimPosition fee math", () => {
+  it("uses integer base-unit payouts and is idempotent", () => {
+    store.mutate((state) => {
+      state.markets.claimMarket = {
+        id: "claimMarket",
+        fixtureId: "fixture",
+        marketType: "match_result",
+        status: "settled",
+        outcomes: { home: 130, draw: 80, away: 570 },
+        totalPool: 780,
+        winningOutcome: "away",
+        createdAt: Date.now(),
+      };
+      state.positions.claimPos = {
+        id: "claimPos",
+        marketId: "claimMarket",
+        owner: "claimer",
+        outcome: "away",
+        amount: 400,
+        claimed: false,
+        createdAt: Date.now(),
+      };
+    }, undefined, undefined, { durable: true });
+
+    const first = service.claimPosition("claimPos", "claimer", "sig-1", 250);
+    assert.equal(first.grossPayout, 547.368421);
+    assert.equal(first.fee, 13.68421);
+    assert.equal(first.payout, 533.684211);
+    assert.equal(first.won, true);
+    assert.equal(store.getState().positions.claimPos.claimed, true);
+
+    const again = service.claimPosition("claimPos", "claimer", undefined, 250);
+    assert.equal(again.payout, first.payout);
+    assert.equal(again.position.claimed, true);
+  });
+});
