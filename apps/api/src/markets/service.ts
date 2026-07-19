@@ -11,6 +11,7 @@ import {
   impliedShares,
   isKnockoutMatchResult,
   payoutBaseUnits,
+  payoutForPosition,
   resolveCorners,
   resolveFirstScorer,
   resolveMatchResult,
